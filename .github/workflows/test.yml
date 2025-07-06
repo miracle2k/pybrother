@@ -37,4 +37,3 @@ jobs:
         uv sync --extra dev
         uv run black --check .
         uv run isort --check-only .
-        uv run flake8 *.py

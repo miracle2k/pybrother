@@ -9,7 +9,6 @@ import io
 
 import pytest
 from inline_snapshot import snapshot
-from PIL import Image
 
 from brother_printer import (
     TAPE_SPECS,
