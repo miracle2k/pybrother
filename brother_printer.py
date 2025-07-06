@@ -154,6 +154,59 @@ def print_with_labelprinterkit(text, font_size, tape_key, margin_px, copies, pri
     return success
 
 # ──────────────────────────────────────────────────────────────
+# Auto-detection functions
+async def detect_tape_size(printer_ip):
+    """Auto-detect tape size from printer configuration"""
+    try:
+        async with IPP(host=printer_ip, port=631, base_path="/ipp/print") as ipp:
+            printer_info = await ipp.printer()
+            
+            # Check printer attributes for media information
+            attrs = printer_info.printer_attributes
+            
+            # Look for media-ready or media-default attributes
+            media_ready = attrs.get("media-ready", [])
+            media_default = attrs.get("media-default", "")
+            media_supported = attrs.get("media-supported", [])
+            
+            print(f"Media ready: {media_ready}")
+            print(f"Media default: {media_default}")
+            print(f"Media supported: {media_supported}")
+            
+            # Try to extract tape width from media names
+            # Brother printers often report media like "w6mm" or "oe6mm"
+            for media in media_ready + [media_default] + media_supported:
+                if not media:
+                    continue
+                media_str = str(media).lower()
+                
+                # Match common Brother tape formats
+                if "w3.5mm" in media_str or "3.5mm" in media_str:
+                    return "W3_5"
+                elif "w6mm" in media_str or "6mm" in media_str:
+                    return "W6"
+                elif "w9mm" in media_str or "9mm" in media_str:
+                    return "W9"
+                elif "w12mm" in media_str or "12mm" in media_str:
+                    return "W12"
+                elif "w18mm" in media_str or "18mm" in media_str:
+                    return "W18"
+                elif "w24mm" in media_str or "24mm" in media_str:
+                    return "W24"
+            
+            # If no specific width found, check printer model for common defaults
+            printer_name = attrs.get("printer-name", "").lower()
+            if "pt-p750w" in printer_name:
+                print("Detected PT-P750W, defaulting to W6 (6mm)")
+                return "W6"
+            
+            return None
+            
+    except Exception as e:
+        print(f"Warning: Could not auto-detect tape size: {e}")
+        return None
+
+# ──────────────────────────────────────────────────────────────
 # IPP communication
 async def send_via_ipp(binary, copies, printer="192.168.1.175"):
     """Send Brother raster data via IPP"""
@@ -176,8 +229,8 @@ def main():
     ap.add_argument("text", help="label text, quotes for spaces")
     ap.add_argument("-f", "--font", type=int, default=40,
                     help="font size px (default 40)")
-    ap.add_argument("-t", "--tape", default="W6",
-                    choices=TAPE_SPECS.keys(), help="tape cassette")
+    ap.add_argument("-t", "--tape", default=None,
+                    choices=TAPE_SPECS.keys(), help="tape cassette (auto-detected if not specified)")
     ap.add_argument("-m", "--margin", type=int, default=10,
                     help="left/right margin inside label in px")
     ap.add_argument("-c", "--copies", type=int, default=1)
@@ -189,11 +242,28 @@ def main():
                     help="enable auto-cut (default: enabled)")
     ap.add_argument("--no-auto-cut", action="store_false", dest="auto_cut",
                     help="disable auto-cut")
+    ap.add_argument("--no-auto-detect", action="store_true",
+                    help="disable auto-detection of tape size")
     
     args = ap.parse_args()
 
     print(f"Brother Label Printer - Mode: {args.mode}")
-    print(f"Text: '{args.text}' | Font: {args.font}px | Tape: {args.tape}")
+    
+    # Auto-detect tape size if not specified
+    tape_size = args.tape
+    if not tape_size and not args.no_auto_detect:
+        print("Auto-detecting tape size...")
+        tape_size = asyncio.run(detect_tape_size(args.printer))
+        if tape_size:
+            print(f"✓ Detected tape: {tape_size}")
+        else:
+            print("⚠ Could not auto-detect tape size, defaulting to W6")
+            tape_size = "W6"
+    elif not tape_size:
+        print("No tape size specified, defaulting to W6")
+        tape_size = "W6"
+    
+    print(f"Text: '{args.text}' | Font: {args.font}px | Tape: {tape_size}")
     
     if args.mode == "labelprinterkit":
         if not LABELPRINTERKIT_AVAILABLE:
@@ -204,7 +274,7 @@ def main():
         
         try:
             success = print_with_labelprinterkit(
-                args.text, args.font, args.tape, args.margin, 
+                args.text, args.font, tape_size, args.margin, 
                 args.copies, args.printer
             )
             print("✓ printed" if success else "✗ failed")
@@ -213,8 +283,8 @@ def main():
             sys.exit(1)
     
     else:  # PNG mode
-        png, spec = create_label_png(args.text, args.font, args.tape, args.margin)
-        filename = f"{args.tape}_{args.text.replace(' ','_')}.png"
+        png, spec = create_label_png(args.text, args.font, tape_size, args.margin)
+        filename = f"{tape_size}_{args.text.replace(' ','_')}.png"
         png.save(filename)
         print(f"✓ Saved PNG: {filename}")
 
@@ -222,7 +292,7 @@ def main():
         raster = convert_to_brother_raster(matrix, spec, hi_res=True, 
                                          feed_mm=1, auto_cut=args.auto_cut)
         
-        bin_filename = f"{args.tape}_{args.text.replace(' ','_')}.bin"
+        bin_filename = f"{tape_size}_{args.text.replace(' ','_')}.bin"
         open(bin_filename, "wb").write(raster)
         print(f"✓ Saved binary: {bin_filename}")
 
