@@ -1,3 +1,0 @@
-labelprinterkit
-pyipp
-Pillow
