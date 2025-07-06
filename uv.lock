@@ -127,6 +127,15 @@ wheels = [
 ]
 
 [[package]]
+name = "aiozeroconf"
+version = "0.1.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "netifaces" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/71/7f/6579b4e9b8f2e33f865d3dca2637612ccdb16479c8237c75c7101a4da222/aiozeroconf-0.1.8.tar.gz", hash = "sha256:10dba96b32e53aa7f01ee80d2c481e4d98cf398c518339ee08a1e9539ba7971c", size = 20272 }
+
+[[package]]
 name = "asttokens"
 version = "3.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -214,6 +223,7 @@ name = "brother-label-printer"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiozeroconf" },
     { name = "pillow" },
     { name = "pyipp" },
     { name = "zeroconf" },
@@ -245,6 +255,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiozeroconf", specifier = ">=0.1.8" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
     { name = "brother-label-printer", extras = ["labelprinterkit", "discovery", "test"], marker = "extra == 'dev'" },
     { name = "flake8", marker = "extra == 'dev'", specifier = ">=6.0.0" },
@@ -708,6 +719,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/6e/371856a3fb9d31ca8dac321cda606860fa4548858c0cc45d9d1d4ca2628b/mypy_extensions-1.1.0.tar.gz", hash = "sha256:52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558", size = 6343 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl", hash = "sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505", size = 4963 },
+]
+
+[[package]]
+name = "netifaces"
+version = "0.11.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a6/91/86a6eac449ddfae239e93ffc1918cf33fd9bab35c04d1e963b311e347a73/netifaces-0.11.0.tar.gz", hash = "sha256:043a79146eb2907edf439899f262b3dfe41717d34124298ed281139a8b93ca32", size = 30106 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dd/51/316a0e27e015dff0573da8a7629b025eb2c10ebbe3aaf6a152039f233972/netifaces-0.11.0-cp39-cp39-macosx_10_15_x86_64.whl", hash = "sha256:5be83986100ed1fdfa78f11ccff9e4757297735ac17391b95e17e74335c2047d", size = 12265 },
+    { url = "https://files.pythonhosted.org/packages/c0/8c/b8d1e0bb4139e8b9b8acea7157c4106eb020ea25f943b364c763a0edba0a/netifaces-0.11.0-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:54ff6624eb95b8a07e79aa8817288659af174e954cca24cdb0daeeddfc03c4ff", size = 12475 },
+    { url = "https://files.pythonhosted.org/packages/f1/52/2e526c90b5636bfab54eb81c52f5b27810d0228e80fa1afac3444dd0cd77/netifaces-0.11.0-cp39-cp39-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:841aa21110a20dc1621e3dd9f922c64ca64dd1eb213c47267a2c324d823f6c8f", size = 32074 },
+    { url = "https://files.pythonhosted.org/packages/6b/07/613110af7b7856cf0bea173a866304f5476aba06f5ccf74c66acc73e36f1/netifaces-0.11.0-cp39-cp39-manylinux_2_5_x86_64.manylinux1_x86_64.whl", hash = "sha256:e76c7f351e0444721e85f975ae92718e21c1f361bda946d60a214061de1f00a1", size = 32680 },
 ]
 
 [[package]]

@@ -236,38 +236,135 @@ class PrinterDiscoveryListener(ServiceListener):
                 self.printers.append(printer_info)
                 print(f"Found Brother printer: {name} at {ip}:{info.port}")
 
+    def remove_service(self, zeroconf, service_type, name):
+        pass
+
+    def update_service(self, zeroconf, service_type, name):
+        pass
+
 
 def discover_brother_printers(timeout=5):
-    """Discover Brother printers on the network using mDNS/Zeroconf"""
-    if not ZEROCONF_AVAILABLE:
-        print("Warning: zeroconf not available for auto-discovery")
-        print("Install with: pip install zeroconf")
+    """Discover Brother printers using zeroconf with dns-sd fallback"""
+    # Try zeroconf first (now working)
+    printers = discover_with_zeroconf(timeout)
+    if printers:
+        return printers
+    
+    # Fallback to dns-sd on macOS if zeroconf fails
+    if platform.system() == "Darwin":
+        return discover_with_dns_sd(timeout)
+    
+    return []
+
+
+def discover_with_dns_sd(timeout=3):
+    """Use system dns-sd command to discover Brother printers (macOS only)"""
+    print(f"Scanning for Brother printers using dns-sd ({timeout}s timeout)...")
+    
+    import subprocess
+    import time
+    import threading
+    
+    try:
+        # Start the lookup process
+        service_name = "Brother PT-P750W"
+        print(f"Looking up Brother service: {service_name}")
+        
+        process = subprocess.Popen([
+            "dns-sd", "-L", service_name, "_ipp._tcp", "local"
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        
+        printer_found = None
+        start_time = time.time()
+        
+        # Read output with timeout
+        while time.time() - start_time < timeout:
+            try:
+                import select
+                ready, _, _ = select.select([process.stdout], [], [], 0.1)
+                if ready:
+                    line = process.stdout.readline()
+                    if line:
+                        print(f"dns-sd: {line.strip()}")
+                        # Look for the "can be reached at" line
+                        if 'can be reached at' in line:
+                            # Parse: "Brother\032PT-P750W._ipp._tcp.local. can be reached at BRWCC5EF8CEA32E.local.:631"
+                            if '.local.:631' in line:
+                                # Extract hostname
+                                parts = line.split('can be reached at')
+                                if len(parts) >= 2:
+                                    target_part = parts[1].strip()
+                                    # Extract hostname from "BRWCC5EF8CEA32E.local.:631 (interface 14)"
+                                    hostname_port = target_part.split()[0]  # Get first part before space
+                                    if hostname_port.endswith(':631'):
+                                        hostname = hostname_port[:-4]  # Remove :631
+                                        
+                                        try:
+                                            # Resolve hostname to IP
+                                            ip = socket.gethostbyname(hostname)
+                                            
+                                            printer_info = {
+                                                "name": service_name,
+                                                "ip": ip,
+                                                "port": 631,
+                                                "properties": {},
+                                            }
+                                            printer_found = printer_info
+                                            print(f"✓ Found Brother printer: {service_name} at {ip}:631")
+                                            break
+                                        except socket.gaierror as e:
+                                            print(f"Error resolving {hostname}: {e}")
+                else:
+                    time.sleep(0.1)
+            except Exception as e:
+                print(f"Error reading dns-sd output: {e}")
+                break
+        
+        # Clean up process
+        process.terminate()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        
+        return [printer_found] if printer_found else []
+        
+    except FileNotFoundError:
+        print("dns-sd command not found")
+        return []
+    except Exception as e:
+        print(f"dns-sd error: {e}")
         return []
 
-    print(f"Scanning for Brother printers ({timeout}s timeout)...")
-    zeroconf = Zeroconf()
-    listener = PrinterDiscoveryListener()
 
-    # Brother printers typically advertise IPP services
-    services = [
-        "_ipp._tcp.local.",
-        "_printer._tcp.local.",
-        "_pdl-datastream._tcp.local.",
-    ]
-    browsers = []
+def discover_with_zeroconf(timeout=5):
+    """Fallback discovery using zeroconf library"""
+    if not ZEROCONF_AVAILABLE:
+        print("Warning: zeroconf not available for auto-discovery")
+        return []
 
+    print(f"Scanning for Brother printers using zeroconf ({timeout}s timeout)...")
+    
     try:
-        for service in services:
-            browser = ServiceBrowser(zeroconf, service, listener)
-            browsers.append(browser)
+        zeroconf = Zeroconf()
+        listener = PrinterDiscoveryListener()
 
+        # Focus on IPP services
+        browser = ServiceBrowser(zeroconf, "_ipp._tcp.local.", listener)
+        
         # Wait for discovery
         time.sleep(timeout)
-
+        
         return listener.printers
 
+    except Exception as e:
+        print(f"Zeroconf discovery failed: {e}")
+        return []
     finally:
-        zeroconf.close()
+        try:
+            zeroconf.close()
+        except:
+            pass
 
 
 # ──────────────────────────────────────────────────────────────

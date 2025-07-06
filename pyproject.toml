@@ -26,6 +26,7 @@ dependencies = [
     "Pillow>=9.5.0,<10.0.0",
     "pyipp>=0.15.0",
     "zeroconf>=0.147.0",
+    "aiozeroconf>=0.1.8",
 ]
 
 [project.optional-dependencies]
