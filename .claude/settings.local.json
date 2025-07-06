@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m pip install:*)",
+      "Bash(python3:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(ls:*)",
+      "WebFetch(domain:pypi.org)",
+      "Bash(npm run build:*)",
+      "Bash(npx tsc:*)",
+      "Bash(ping:*)",
+      "Bash(rm:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "WebFetch(domain:docs.rs)",
+      "Bash(grep:*)",
+      "Bash(python:*)",
+      "Bash(node:*)",
+      "Bash(npx ts-node:*)",
+      "Bash(bun run:*)",
+      "Bash(mkdir:*)"
+    ],
+    "deny": []
+  }
+}
