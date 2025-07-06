@@ -44,8 +44,13 @@ FEED_PX_PER_MM = 14  # ≅ 360 dpi
 
 # ──────────────────────────────────────────────────────────────
 # PNG-based implementation
-def create_label_png(text, font_size, tape_key, margin_px):
-    """Create PNG with perfect symmetric centering using ink-based measurement"""
+def create_label_png(text, font_size, tape_key, margin_px, white_tape=False):
+    """Create PNG with perfect symmetric centering using ink-based measurement
+    
+    Args:
+        white_tape: If True, creates white background with black text (for white tapes)
+                   If False, creates black background with white text (for black tapes)
+    """
     spec = TAPE_SPECS[tape_key]
     tape_h_px = spec["pins"]
     
@@ -67,13 +72,24 @@ def create_label_png(text, font_size, tape_key, margin_px):
     # Create canvas with symmetric margins
     canvas_w = glyph_w + 2*margin_px
     canvas_h = tape_h_px
-    img = Image.new("L", (canvas_w, canvas_h), 255)
+    
+    # Set colors based on tape type
+    if white_tape:
+        # White tape: white background (255), black text (0)
+        bg_color = 255
+        text_color = 0
+    else:
+        # Black tape: black background (0), white text (255)  
+        bg_color = 0
+        text_color = 255
+    
+    img = Image.new("L", (canvas_w, canvas_h), bg_color)
     draw = ImageDraw.Draw(img)
 
     # Position text so ink is perfectly centered
     x = margin_px - left
     y = (canvas_h - glyph_h)//2 - top
-    draw.text((x, y), text, font=font, fill=0)
+    draw.text((x, y), text, font=font, fill=text_color)
     return img, spec
 
 def png_to_bw_matrix(img, threshold=128):
@@ -139,13 +155,13 @@ def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=1, auto_cut=Tru
 
 # ──────────────────────────────────────────────────────────────
 # Labelprinterkit-based implementation
-def print_with_labelprinterkit(text, font_size, tape_key, margin_px, copies, printer_ip):
+def print_with_labelprinterkit(text, font_size, tape_key, margin_px, copies, printer_ip, white_tape=False):
     """Print using labelprinterkit library"""
     if not LABELPRINTERKIT_AVAILABLE:
         raise ImportError("labelprinterkit not available. Install with: pip install labelprinterkit")
     
     # Create PNG using same centering logic
-    png, spec = create_label_png(text, font_size, tape_key, margin_px)
+    png, spec = create_label_png(text, font_size, tape_key, margin_px, white_tape)
     
     # Save PNG for reference
     filename = f"{tape_key}_{text.replace(' ', '_')}_labelprinterkit.png"
@@ -304,6 +320,8 @@ def main():
                     help="disable auto-detection of tape size")
     ap.add_argument("--no-discover", action="store_true",
                     help="disable auto-discovery of printer IP")
+    ap.add_argument("--white-tape", action="store_true",
+                    help="use white tape mode (black text on white background)")
     
     args = ap.parse_args()
 
@@ -340,7 +358,8 @@ def main():
         print("No tape size specified, defaulting to W6")
         tape_size = "W6"
     
-    print(f"Text: '{args.text}' | Font: {args.font}px | Tape: {tape_size}")
+    tape_type = "white" if args.white_tape else "black"
+    print(f"Text: '{args.text}' | Font: {args.font}px | Tape: {tape_size} ({tape_type})")
     
     if args.mode == "labelprinterkit":
         if not LABELPRINTERKIT_AVAILABLE:
@@ -352,7 +371,7 @@ def main():
         try:
             success = print_with_labelprinterkit(
                 args.text, args.font, tape_size, args.margin, 
-                args.copies, printer_ip
+                args.copies, printer_ip, args.white_tape
             )
             print("✓ printed" if success else "✗ failed")
         except Exception as e:
@@ -360,7 +379,7 @@ def main():
             sys.exit(1)
     
     else:  # PNG mode
-        png, spec = create_label_png(args.text, args.font, tape_size, args.margin)
+        png, spec = create_label_png(args.text, args.font, tape_size, args.margin, args.white_tape)
         filename = f"{tape_size}_{args.text.replace(' ','_')}.png"
         png.save(filename)
         print(f"✓ Saved PNG: {filename}")
