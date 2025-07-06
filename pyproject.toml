@@ -23,7 +23,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "Pillow>=9.0.0",
+    "Pillow>=10.0.0",
     "pyipp>=0.15.0",
 ]
 
