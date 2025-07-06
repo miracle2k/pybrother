@@ -4,17 +4,18 @@ Test suite for Brother label printer PNG generation and binary output
 Uses inline snapshots to ensure layout consistency
 """
 
-import pytest
-from inline_snapshot import snapshot
 import base64
 import io
+
+import pytest
+from inline_snapshot import snapshot
 from PIL import Image
 
 from brother_printer import (
+    TAPE_SPECS,
+    convert_to_brother_raster,
     create_label_png,
     png_to_bw_matrix,
-    convert_to_brother_raster,
-    TAPE_SPECS,
 )
 
 

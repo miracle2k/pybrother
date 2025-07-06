@@ -5,14 +5,15 @@ Supports both PNG-based and labelprinterkit-based printing modes
 Works with W3.5 • W6 • W9 • W12 • W18 • W24 tapes
 """
 
-import asyncio
-import sys
-import platform
-import struct
 import argparse
-import socket
-import time
+import asyncio
 import os
+import platform
+import socket
+import struct
+import sys
+import time
+
 from PIL import Image, ImageDraw, ImageFont
 from pyipp import IPP
 from pyipp.enums import IppOperation
@@ -26,7 +27,7 @@ except ImportError:
     LABELPRINTERKIT_AVAILABLE = False
 
 try:
-    from zeroconf import ServiceBrowser, Zeroconf, ServiceListener
+    from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
 
     ZEROCONF_AVAILABLE = True
 except ImportError:
