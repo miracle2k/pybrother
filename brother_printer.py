@@ -276,43 +276,66 @@ async def detect_tape_size(printer_ip):
     """Auto-detect tape size from printer configuration"""
     try:
         async with IPP(host=printer_ip, port=631, base_path="/ipp/print") as ipp:
+            # Get media attributes using direct IPP request
+            message = {
+                'operation-attributes-tag': {
+                    'requesting-user-name': 'pyipp',
+                    'requested-attributes': [
+                        'media-ready',
+                        'media-default', 
+                        'media-supported',
+                        'printer-name',
+                        'printer-make-and-model'
+                    ]
+                }
+            }
+            
+            # Execute the request and get media information
+            result = await ipp.execute(IppOperation.GET_PRINTER_ATTRIBUTES, message)
+            
+            # Extract media information from the first printer in the response
+            if result.get('printers') and len(result['printers']) > 0:
+                printer_attrs = result['printers'][0]
+                
+                # Look for media-ready or media-default attributes
+                media_ready = printer_attrs.get("media-ready", "")
+                media_default = printer_attrs.get("media-default", "")
+                media_supported = printer_attrs.get("media-supported", [])
+
+                print(f"Media ready: {media_ready}")
+                print(f"Media default: {media_default}")
+                print(f"Media supported: {media_supported}")
+
+                # Try to extract tape width from media names
+                # Brother printers often report media like "roll_current_6x0mm"
+                media_list = [media_ready, media_default]
+                if isinstance(media_supported, list):
+                    media_list.extend(media_supported)
+                
+                for media in media_list:
+                    if not media:
+                        continue
+                    media_str = str(media).lower()
+
+                    # Match common Brother tape formats
+                    # Look for patterns like "3.5", "6x", "roll_current_6x0mm", etc.
+                    if "3.5" in media_str or "3_5" in media_str:
+                        return "W3_5"
+                    elif "6x" in media_str or "6mm" in media_str or "_6x" in media_str:
+                        return "W6"
+                    elif "9x" in media_str or "9mm" in media_str or "_9x" in media_str:
+                        return "W9"
+                    elif "12x" in media_str or "12mm" in media_str or "_12x" in media_str:
+                        return "W12"
+                    elif "18x" in media_str or "18mm" in media_str or "_18x" in media_str:
+                        return "W18"
+                    elif "24x" in media_str or "24mm" in media_str or "_24x" in media_str:
+                        return "W24"
+
+            # If no specific width found, try to get printer info for fallback
             printer_info = await ipp.printer()
-
-            # Check printer attributes for media information
-            attrs = printer_info.printer_attributes
-
-            # Look for media-ready or media-default attributes
-            media_ready = attrs.get("media-ready", [])
-            media_default = attrs.get("media-default", "")
-            media_supported = attrs.get("media-supported", [])
-
-            print(f"Media ready: {media_ready}")
-            print(f"Media default: {media_default}")
-            print(f"Media supported: {media_supported}")
-
-            # Try to extract tape width from media names
-            # Brother printers often report media like "w6mm" or "oe6mm"
-            for media in media_ready + [media_default] + media_supported:
-                if not media:
-                    continue
-                media_str = str(media).lower()
-
-                # Match common Brother tape formats
-                if "w3.5mm" in media_str or "3.5mm" in media_str:
-                    return "W3_5"
-                elif "w6mm" in media_str or "6mm" in media_str:
-                    return "W6"
-                elif "w9mm" in media_str or "9mm" in media_str:
-                    return "W9"
-                elif "w12mm" in media_str or "12mm" in media_str:
-                    return "W12"
-                elif "w18mm" in media_str or "18mm" in media_str:
-                    return "W18"
-                elif "w24mm" in media_str or "24mm" in media_str:
-                    return "W24"
-
-            # If no specific width found, check printer model for common defaults
-            printer_name = attrs.get("printer-name", "").lower()
+            printer_name = printer_info.info.model.lower() if printer_info.info.model else ""
+            
             if "pt-p750w" in printer_name:
                 print("Detected PT-P750W, defaulting to W6 (6mm)")
                 return "W6"
