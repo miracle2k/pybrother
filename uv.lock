@@ -216,6 +216,7 @@ source = { editable = "." }
 dependencies = [
     { name = "pillow" },
     { name = "pyipp" },
+    { name = "zeroconf" },
 ]
 
 [package.optional-dependencies]
@@ -255,6 +256,7 @@ requires-dist = [
     { name = "pyipp", specifier = ">=0.15.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.21.0" },
+    { name = "zeroconf", specifier = ">=0.147.0" },
     { name = "zeroconf", marker = "extra == 'discovery'", specifier = ">=0.47.0" },
 ]
 
