@@ -10,16 +10,24 @@ import sys
 import platform
 import struct
 import argparse
+import socket
+import time
 from PIL import Image, ImageDraw, ImageFont
 from pyipp import IPP
 from pyipp.enums import IppOperation
 
-# Try importing labelprinterkit (optional dependency)
+# Try importing optional dependencies
 try:
     from labelprinterkit import BrotherQLPrinter
     LABELPRINTERKIT_AVAILABLE = True
 except ImportError:
     LABELPRINTERKIT_AVAILABLE = False
+
+try:
+    from zeroconf import ServiceBrowser, Zeroconf, ServiceListener
+    ZEROCONF_AVAILABLE = True
+except ImportError:
+    ZEROCONF_AVAILABLE = False
 
 # ──────────────────────────────────────────────────────────────
 # Tape catalogue (data from Brother "Raster Command Reference")
@@ -154,6 +162,56 @@ def print_with_labelprinterkit(text, font_size, tape_key, margin_px, copies, pri
     return success
 
 # ──────────────────────────────────────────────────────────────
+# Auto-discovery functions
+class PrinterDiscoveryListener(ServiceListener):
+    """Zeroconf service listener for Brother printers"""
+    def __init__(self):
+        self.printers = []
+    
+    def add_service(self, zeroconf, service_type, name):
+        info = zeroconf.get_service_info(service_type, name)
+        if info and "brother" in name.lower():
+            # Extract IP address
+            if info.addresses:
+                ip = socket.inet_ntoa(info.addresses[0])
+                printer_info = {
+                    'name': name,
+                    'ip': ip,
+                    'port': info.port,
+                    'properties': info.properties
+                }
+                self.printers.append(printer_info)
+                print(f"Found Brother printer: {name} at {ip}:{info.port}")
+
+def discover_brother_printers(timeout=5):
+    """Discover Brother printers on the network using mDNS/Zeroconf"""
+    if not ZEROCONF_AVAILABLE:
+        print("Warning: zeroconf not available for auto-discovery")
+        print("Install with: pip install zeroconf")
+        return []
+    
+    print(f"Scanning for Brother printers ({timeout}s timeout)...")
+    zeroconf = Zeroconf()
+    listener = PrinterDiscoveryListener()
+    
+    # Brother printers typically advertise IPP services
+    services = ["_ipp._tcp.local.", "_printer._tcp.local.", "_pdl-datastream._tcp.local."]
+    browsers = []
+    
+    try:
+        for service in services:
+            browser = ServiceBrowser(zeroconf, service, listener)
+            browsers.append(browser)
+        
+        # Wait for discovery
+        time.sleep(timeout)
+        
+        return listener.printers
+        
+    finally:
+        zeroconf.close()
+
+# ──────────────────────────────────────────────────────────────
 # Auto-detection functions
 async def detect_tape_size(printer_ip):
     """Auto-detect tape size from printer configuration"""
@@ -234,8 +292,8 @@ def main():
     ap.add_argument("-m", "--margin", type=int, default=10,
                     help="left/right margin inside label in px")
     ap.add_argument("-c", "--copies", type=int, default=1)
-    ap.add_argument("-p", "--printer", default="192.168.1.175",
-                    help="printer IP address")
+    ap.add_argument("-p", "--printer", default=None,
+                    help="printer IP address (auto-discovered if not specified)")
     ap.add_argument("--mode", choices=["png", "labelprinterkit"], default="png",
                     help="printing mode: png (built-in) or labelprinterkit (library)")
     ap.add_argument("--auto-cut", action="store_true", default=True,
@@ -244,16 +302,35 @@ def main():
                     help="disable auto-cut")
     ap.add_argument("--no-auto-detect", action="store_true",
                     help="disable auto-detection of tape size")
+    ap.add_argument("--no-discover", action="store_true",
+                    help="disable auto-discovery of printer IP")
     
     args = ap.parse_args()
 
     print(f"Brother Label Printer - Mode: {args.mode}")
     
+    # Auto-discover printer IP if not specified
+    printer_ip = args.printer
+    if not printer_ip and not args.no_discover:
+        print("Auto-discovering Brother printers...")
+        printers = discover_brother_printers(timeout=5)
+        if printers:
+            printer_ip = printers[0]['ip']
+            print(f"✓ Using printer: {printers[0]['name']} at {printer_ip}")
+            if len(printers) > 1:
+                print(f"Note: Found {len(printers)} printers, using first one")
+        else:
+            print("⚠ No Brother printers found, using default IP")
+            printer_ip = "192.168.1.175"
+    elif not printer_ip:
+        print("No printer IP specified, using default")
+        printer_ip = "192.168.1.175"
+    
     # Auto-detect tape size if not specified
     tape_size = args.tape
     if not tape_size and not args.no_auto_detect:
         print("Auto-detecting tape size...")
-        tape_size = asyncio.run(detect_tape_size(args.printer))
+        tape_size = asyncio.run(detect_tape_size(printer_ip))
         if tape_size:
             print(f"✓ Detected tape: {tape_size}")
         else:
@@ -275,7 +352,7 @@ def main():
         try:
             success = print_with_labelprinterkit(
                 args.text, args.font, tape_size, args.margin, 
-                args.copies, args.printer
+                args.copies, printer_ip
             )
             print("✓ printed" if success else "✗ failed")
         except Exception as e:
@@ -296,7 +373,7 @@ def main():
         open(bin_filename, "wb").write(raster)
         print(f"✓ Saved binary: {bin_filename}")
 
-        ok = asyncio.run(send_via_ipp(raster, args.copies, args.printer))
+        ok = asyncio.run(send_via_ipp(raster, args.copies, printer_ip))
         print("✓ printed" if ok else "✗ failed")
 
 if __name__ == "__main__":
