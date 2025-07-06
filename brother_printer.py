@@ -257,77 +257,110 @@ def discover_brother_printers(timeout=5):
     return []
 
 
-def discover_with_dns_sd(timeout=3):
+def discover_with_dns_sd(timeout=5):
     """Use system dns-sd command to discover Brother printers (macOS only)"""
     print(f"Scanning for Brother printers using dns-sd ({timeout}s timeout)...")
     
     import subprocess
     import time
-    import threading
     
     try:
-        # Start the lookup process
-        service_name = "Brother PT-P750W"
-        print(f"Looking up Brother service: {service_name}")
-        
-        process = subprocess.Popen([
-            "dns-sd", "-L", service_name, "_ipp._tcp", "local"
+        # First, browse for IPP services to find Brother printers
+        print("Browsing for IPP services...")
+        browse_process = subprocess.Popen([
+            "dns-sd", "-B", "_ipp._tcp", "local"
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         
-        printer_found = None
+        brother_services = []
         start_time = time.time()
         
-        # Read output with timeout
+        # Read browse output to find Brother services
         while time.time() - start_time < timeout:
             try:
                 import select
-                ready, _, _ = select.select([process.stdout], [], [], 0.1)
+                ready, _, _ = select.select([browse_process.stdout], [], [], 0.1)
                 if ready:
-                    line = process.stdout.readline()
+                    line = browse_process.stdout.readline()
                     if line:
-                        print(f"dns-sd: {line.strip()}")
-                        # Look for the "can be reached at" line
-                        if 'can be reached at' in line:
-                            # Parse: "Brother\032PT-P750W._ipp._tcp.local. can be reached at BRWCC5EF8CEA32E.local.:631"
-                            if '.local.:631' in line:
-                                # Extract hostname
-                                parts = line.split('can be reached at')
-                                if len(parts) >= 2:
-                                    target_part = parts[1].strip()
-                                    # Extract hostname from "BRWCC5EF8CEA32E.local.:631 (interface 14)"
-                                    hostname_port = target_part.split()[0]  # Get first part before space
-                                    if hostname_port.endswith(':631'):
-                                        hostname = hostname_port[:-4]  # Remove :631
-                                        
-                                        try:
-                                            # Resolve hostname to IP
-                                            ip = socket.gethostbyname(hostname)
-                                            
-                                            printer_info = {
-                                                "name": service_name,
-                                                "ip": ip,
-                                                "port": 631,
-                                                "properties": {},
-                                            }
-                                            printer_found = printer_info
-                                            print(f"✓ Found Brother printer: {service_name} at {ip}:631")
-                                            break
-                                        except socket.gaierror as e:
-                                            print(f"Error resolving {hostname}: {e}")
+                        print(f"Browse: {line.strip()}")
+                        # Look for Brother services: "21:44:56.870  Add        2  14 local.               _ipp._tcp.           Brother PT-P750W"
+                        if 'Add' in line and 'brother' in line.lower() and '_ipp._tcp' in line:
+                            parts = line.split()
+                            if len(parts) >= 6:
+                                service_name = parts[-1]  # Last field is the service name
+                                brother_services.append(service_name)
+                                print(f"Found Brother service: {service_name}")
                 else:
                     time.sleep(0.1)
             except Exception as e:
-                print(f"Error reading dns-sd output: {e}")
+                print(f"Error reading browse output: {e}")
                 break
         
-        # Clean up process
-        process.terminate()
+        # Clean up browse process
+        browse_process.terminate()
         try:
-            process.wait(timeout=1)
+            browse_process.wait(timeout=1)
         except subprocess.TimeoutExpired:
-            process.kill()
+            browse_process.kill()
         
-        return [printer_found] if printer_found else []
+        # Now lookup each Brother service to get IP addresses
+        printers = []
+        for service_name in brother_services:
+            print(f"Looking up service: {service_name}")
+            try:
+                lookup_process = subprocess.Popen([
+                    "dns-sd", "-L", service_name, "_ipp._tcp", "local"
+                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                
+                lookup_start = time.time()
+                while time.time() - lookup_start < 3:  # 3 second timeout for lookup
+                    try:
+                        ready, _, _ = select.select([lookup_process.stdout], [], [], 0.1)
+                        if ready:
+                            line = lookup_process.stdout.readline()
+                            if line:
+                                print(f"Lookup: {line.strip()}")
+                                if 'can be reached at' in line:
+                                    # Parse: "Brother\032PT-P750W._ipp._tcp.local. can be reached at BRWCC5EF8CEA32E.local.:631"
+                                    if '.local.:631' in line:
+                                        parts = line.split('can be reached at')
+                                        if len(parts) >= 2:
+                                            target_part = parts[1].strip()
+                                            hostname_port = target_part.split()[0]
+                                            if hostname_port.endswith(':631'):
+                                                hostname = hostname_port[:-4]
+                                                
+                                                try:
+                                                    ip = socket.gethostbyname(hostname)
+                                                    printer_info = {
+                                                        "name": service_name,
+                                                        "ip": ip,
+                                                        "port": 631,
+                                                        "properties": {},
+                                                    }
+                                                    printers.append(printer_info)
+                                                    print(f"✓ Found Brother printer: {service_name} at {ip}:631")
+                                                    break
+                                                except socket.gaierror as e:
+                                                    print(f"Error resolving {hostname}: {e}")
+                        else:
+                            time.sleep(0.1)
+                    except Exception as e:
+                        print(f"Error in lookup: {e}")
+                        break
+                
+                # Clean up lookup process
+                lookup_process.terminate()
+                try:
+                    lookup_process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    lookup_process.kill()
+                    
+            except Exception as e:
+                print(f"Error looking up {service_name}: {e}")
+                continue
+        
+        return printers
         
     except FileNotFoundError:
         print("dns-sd command not found")
