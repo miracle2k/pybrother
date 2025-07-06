@@ -8,84 +8,67 @@ This reproduces the same result as labelprinterkit but starting from PNG generat
 
 import asyncio
 import sys
+import argparse
 import platform
 import struct
 from PIL import Image, ImageDraw, ImageFont
 from pyipp import IPP
 from pyipp.enums import IppOperation
 
-def create_6mm_label_png(text="Hello!", font_size=40):
+
+def create_6mm_label_png(text="Hello!", font_size=40, margin_per_side=10):
     """
-    Create a 6mm label PNG exactly like JavaScript demo.ts
-    
-    Args:
-        text: Text to print on the label
-        font_size: Font size in pixels (default: 40 for high-res)
+    Return a PIL image for a 6 mm tape.
+    `margin_per_side` is the printable margin you want
+    **inside the label**, in pixels, on both left and right.
     """
-    
-    print(f"Creating 6mm PNG label with text: '{text}' (JavaScript demo approach)")
-    
-    # Fixed tape dimensions
-    tape_width_mm = 6
-    high_resolution = True
-    pixels_per_mm = 14 if high_resolution else 7  # 14 pixels/mm for high-res
-    tape_width_px = tape_width_mm * pixels_per_mm  # 84 pixels across tape
-    
-    # Get font first to measure text accurately
+
+    # ──────────────────────────────────────────────────────────
+    # 1. CONSTANTS • tape geometry
+    tape_width_mm   = 6
+    hi_res          = True
+    px_per_mm       = 14 if hi_res else 7           # Brother 180 dpi vs 360 dpi
+    tape_height_px  = tape_width_mm * px_per_mm     # 84 px for 6 mm @ 360 dpi
+
+    # ──────────────────────────────────────────────────────────
+    # 2. CHOOSE A FONT
     try:
         if platform.system() == "Darwin":
             font_path = "/System/Library/Fonts/Arial.ttf"
         else:
             font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-        
         font = ImageFont.truetype(font_path, font_size)
-        
     except Exception:
         font = ImageFont.load_default()
-        # If default font is used, scale the requested size appropriately
-        font_size = min(font_size, 30)  # Default font limitations
-    
-    print(f"Font size: {font_size}px")
-    
-    # Create temporary image to measure text accurately
-    temp_img = Image.new('L', (1000, 1000), color=255)
-    temp_draw = ImageDraw.Draw(temp_img)
-    
-    # Get actual text bounding box for precise measurements
-    bbox = temp_draw.textbbox((0, 0), text, font=font)
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
-    
-    print(f"Measured text: {text_width}x{text_height}px")
-    
-    # Calculate label dimensions with padding
-    padding = 20  # 10px on each side
-    label_length_px = text_width + padding
-    
-    print(f"PNG dimensions: {label_length_px}x{tape_width_px}px (fitted to text)")
-    
-    # Create actual image with exact dimensions needed
-    img = Image.new('L', (label_length_px, tape_width_px), color=255)  # White background
+        font_size = min(font_size, 30)
+
+    # ──────────────────────────────────────────────────────────
+    # 3. MEASURE ONLY THE *INK* BOX (no side bearings, no ascender gap)
+    mask = Image.new("1", (2000, 1000), 0)          # big scratch canvas
+    ImageDraw.Draw(mask).text((0, 0), text, font=font, fill=1)
+    ink_left, ink_top, ink_right, ink_bottom = mask.getbbox()   # <- pure glyphs
+    glyph_w = ink_right  - ink_left
+    glyph_h = ink_bottom - ink_top
+
+    # ──────────────────────────────────────────────────────────
+    # 4. CREATE THE CANVAS WITH SYMMETRIC HORIZONTAL MARGINS
+    canvas_w = glyph_w + 2 * margin_per_side
+    canvas_h = tape_height_px
+    img  = Image.new("L", (canvas_w, canvas_h), 255)     # white
     draw = ImageDraw.Draw(img)
-    
-    # True centering: compensate for PIL's textbbox font margins
-    # textbbox() includes font spacing above ascenders and to the left
-    # We need to subtract bbox[0] and bbox[1] to center the actual glyphs
-    
-    # Center horizontally and vertically, compensating for font's internal offset
-    x = (label_length_px - text_width) // 2 - bbox[0]
-    y = (tape_width_px - text_height) // 2 - bbox[1]
-    
-    print(f"Text centered at: ({x}, {y}) with bbox offset compensation")
-    print(f"  Label: {label_length_px}x{tape_width_px}px")
-    print(f"  Text: {text_width}x{text_height}px")
-    print(f"  Bbox offset: ({bbox[0]}, {bbox[1]})")
-    
-    # Draw BLACK TEXT on white background (like JavaScript demo)
-    # fillStyle = '#000' means black text
-    draw.text((x, int(y)), text, fill=0, font=font)  # 0 = black text
-    
+
+    # ──────────────────────────────────────────────────────────
+    # 5. POSITION SO THAT THE *INK* IS PERFECTLY CENTRED
+    x = margin_per_side - ink_left                       # exact left margin
+    y = (canvas_h - glyph_h) // 2 - ink_top              # exact vertical centre
+    draw.text((x, y), text, font=font, fill=0)
+
+    # diagnostic prints (optional)
+    print(f"Canvas {canvas_w}×{canvas_h}px   Glyph {glyph_w}×{glyph_h}px")
+    print(f"Placed at ({x}, {y})   margins: {margin_per_side}px each side")
+
     return img
+
 
 def png_to_black_white_matrix(img, threshold=128):
     """
@@ -218,8 +201,11 @@ def convert_to_brother_raster(image_matrix, tape_width=6, high_resolution=True):
     
     return binary_data
 
-async def send_to_printer_ipp(binary_data, printer_ip="192.168.1.175"):
-    """Send Brother raster data to printer via IPP (same as labelprinterkit version)"""
+async def send_to_printer_ipp(binary_data, printer_ip="192.168.1.175", copies=1):
+    """Send Brother raster data to printer via IPP (same as labelprinterkit version)
+    Args:
+        copies: number of copies to print
+    """
     
     print(f"Sending {len(binary_data)} bytes to printer via IPP...")
     
@@ -243,7 +229,7 @@ async def send_to_printer_ipp(binary_data, printer_ip="192.168.1.175"):
                     "document-format": "application/octet-stream",
                 },
                 "job-attributes-tag": {
-                    "copies": 1,
+                    "copies": copies,
                     "sides": "one-sided", 
                     "orientation-requested": 4,  # landscape
                 },

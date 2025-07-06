@@ -1,178 +1,155 @@
 #!/usr/bin/env python3
 """
-Brother Label Printer - Pure Python Solution
-Uses labelprinterkit + pyipp for 6mm tape labels with perfect centering
+Universal PNG‑based Brother label printer.
+Works with W3_5 • W6 • W9 • W12 • W18 • W24 tapes
 """
 
-import asyncio
-import sys
-import platform
+import asyncio, sys, platform, struct, argparse
+from PIL import Image, ImageDraw, ImageFont
 from pyipp import IPP
 from pyipp.enums import IppOperation
-from labelprinterkit.printers import P750W
-from labelprinterkit.label import Label, Text, Padding
-from labelprinterkit.job import Job
-from labelprinterkit.constants import Media
 
-def create_6mm_label(text="Hello!", font_scale=0.75):
-    """
-    Create a 6mm label using labelprinterkit with perfect centering
-    
-    Args:
-        text: Text to print on the label
-        font_scale: Font size as percentage of print area (0.75 = 75% recommended)
-    """
-    
-    print(f"Creating 6mm label with text: '{text}'")
-    
-    # Get system font path
-    if platform.system() == "Darwin":  # macOS
-        font_path = "/System/Library/Fonts/Arial.ttf"
-    else:  # Linux
-        font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-    
-    # Create job for 6mm tape
-    job = Job(Media.W6)
-    
-    # Get 6mm tape specifications
-    media_info = Media.W6.value
-    print(f"6mm tape - Print area: {media_info.printarea} pixels")
-    
-    # Use full print area as height but control font size separately
-    font_size = int(media_info.printarea * font_scale)
-    
-    print(f"Font size: {font_size}px ({font_scale*100:.0f}% of {media_info.printarea}px print area)")
-    
-    # Calculate padding for perfect vertical centering (tested and confirmed)
-    remaining_space = media_info.printarea - font_size
-    centering_offset = 2  # Tested perfect value for 6mm tape
-    vertical_padding = (remaining_space // 2) + centering_offset
-    
-    print(f"Perfect centering: {vertical_padding}px top padding")
-    
-    # Create text with vertical padding to center it
-    text_obj = Text(
-        height=media_info.printarea, 
-        text=text, 
-        font_path=font_path, 
-        font_size=font_size,
-        padding=Padding(left=0, top=vertical_padding, bottom=0, right=0)
-    )
-    
-    # Create label directly - labelprinterkit should center it
-    label = Label(text_obj)
-    job.add_page(label)
-    
-    # Create backend to capture data
-    class DataCapture:
-        def __init__(self):
-            self.data = b""
-        
-        def write(self, data):
-            self.data += data
-            return len(data)
-    
-    backend = DataCapture()
-    printer = P750W(backend)
-    
-    # Generate the binary data
-    printer.print(job)
-    
-    return backend.data
+# ──────────────────────────────────────────────────────────────
+# 1.  Tape catalogue  (data lifted from Brother "Raster Command
+#     Reference" manual ‑ Table 2‑6, media width section)     ──
+TAPE_SPECS = {
+    "W3_5": {"mm": 3.5, "media_byte": 0x04, "pins": 24},
+    "W6":   {"mm": 6,   "media_byte": 0x06, "pins": 32},
+    "W9":   {"mm": 9,   "media_byte": 0x09, "pins": 50},
+    "W12":  {"mm": 12,  "media_byte": 0x0C, "pins": 70},
+    "W18":  {"mm": 18,  "media_byte": 0x12, "pins": 112},
+    "W24":  {"mm": 24,  "media_byte": 0x18, "pins": 128},
+}
 
-async def send_to_printer_ipp(binary_data, printer_ip="192.168.1.175"):
-    """Send binary data to printer using proper IPP protocol"""
-    
-    print(f"Connecting to printer at {printer_ip}...")
-    
+# horizontal feed direction: keep the nice high‑res 14 px/mm
+FEED_PX_PER_MM = 14            # ≅ 360 dpi
+
+# ──────────────────────────────────────────────────────────────
+def create_label_png(text, font_size, tape_key, margin_px):
+    spec = TAPE_SPECS[tape_key]
+    tape_h_px = spec["pins"]                 # vertical (tape) axis
+    # choose a font
     try:
-        # Create IPP client
-        async with IPP(host=printer_ip, port=631, base_path="/ipp/print") as ipp:
-            
-            # Check printer status first
-            print("Checking printer status...")
-            printer_info = await ipp.printer()
-            print(f"Printer: {printer_info.info.name}")
-            print(f"State: {printer_info.state}")
-            
-            if printer_info.state.printer_state != "idle":
-                print(f"Warning: Printer state is '{printer_info.state.printer_state}', not idle")
-            else:
-                print("✓ Printer is ready")
-            
-            # Send print job using execute method
-            print(f"Sending {len(binary_data)} bytes to printer...")
-            
-            # Use execute method to send Print-Job operation
-            message = {
-                "operation-attributes-tag": {
-                    "requesting-user-name": "python",
-                    "job-name": "python_label",
-                    "document-format": "application/octet-stream",
-                },
-                "job-attributes-tag": {
-                    "copies": 1,
-                    "sides": "one-sided", 
-                    "orientation-requested": 4,  # 4 = landscape
-                },
-                "data": binary_data
-            }
-            
-            response = await ipp.execute(IppOperation.PRINT_JOB, message)
-            
-            # Don't print the full response as it's verbose
-            
-            # Check if job was successful (status-code 0 = successful-ok)
-            status_code = response.get("status-code", -1)
-            if status_code == 0:  # 0 = successful-ok
-                job_info = response.get("jobs", [{}])[0]
-                job_id = job_info.get("job-id", "unknown")
-                job_state = job_info.get("job-state", "unknown")
-                print(f"✓ Job submitted successfully! ID: {job_id}, State: {job_state}")
-                return True
-            else:
-                print(f"✗ Job submission failed with status: {status_code}")
-                print(f"Response: {response}")
-                return False
-            
-    except Exception as e:
-        print(f"✗ Error communicating with printer: {e}")
-        return False
+        font_path = ("/System/Library/Fonts/Arial.ttf"
+                     if platform.system() == "Darwin"
+                     else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+        font = ImageFont.truetype(font_path, font_size)
+    except Exception:
+        font = ImageFont.load_default()
 
-def main():
-    """Main function for 6mm label printing"""
-    
-    print("Brother 6mm Label Printer - Pure Python")
-    print("=" * 40)
-    
-    # Get text from command line or use default
-    if len(sys.argv) > 1:
-        text = " ".join(sys.argv[1:])
-    else:
-        text = "Python ✓"
-    
-    # Create the 6mm label with perfect centering
-    font_scale = 0.75      # 75% of height for nice margins
-    binary_data = create_6mm_label(text, font_scale)
-    
-    if binary_data:
-        print(f"✓ Generated {len(binary_data)} bytes of label data")
-        
-        # Save for inspection
-        with open("6mm_label.bin", "wb") as f:
-            f.write(binary_data)
-        print("✓ Saved to 6mm_label.bin")
-        
-        # Send to printer using asyncio
-        print("\nSending to printer via IPP...")
-        success = asyncio.run(send_to_printer_ipp(binary_data))
-        
-        if success:
-            print("✓ Label printed successfully!")
-        else:
-            print("✗ Print failed")
-    else:
-        print("✗ Failed to generate label data")
+    # measure *ink* only
+    mask = Image.new("1", (2000, 1000), 0)
+    ImageDraw.Draw(mask).text((0, 0), text, font=font, fill=1)
+    left, top, right, bottom = mask.getbbox()
+    glyph_w, glyph_h = right-left, bottom-top
+
+    # canvas size
+    canvas_w = glyph_w + 2*margin_px                    # symmetric margin
+    canvas_h = tape_h_px
+    img  = Image.new("L", (canvas_w, canvas_h), 255)
+    draw = ImageDraw.Draw(img)
+
+    # place glyphs so that the visible ink is centred
+    x = margin_px - left
+    y = (canvas_h - glyph_h)//2 - top
+    draw.text((x, y), text, font=font, fill=0)
+    return img, spec
+
+# ──────────────────────────────────────────────────────────────
+def png_to_bw_matrix(img, threshold=128):
+    if img.mode != "L":
+        img = img.convert("L")
+    w, h = img.size
+    data = [
+        [1 if img.getpixel((x, y)) < threshold else 0 for x in range(w)]
+        for y in range(h)
+    ]
+    return {"width": w, "height": h, "data": data}
+
+# ──────────────────────────────────────────────────────────────
+def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=1):
+    w, h = matrix["width"], matrix["height"]
+    data = [b"\x00"*400,                     # NULL * 400
+            b"\x1B\x40",                    # ESC @
+            b"\x1B\x69\x61\x01"]            # ESC i a 01  (raster mode)
+
+    # ESC i z – print‑info (tell cassette width)
+    data.append(struct.pack("<BBBBBBBBBBBBB",
+        0x1B,0x69,0x7A,                   # ESC i z
+        0x84,                             # 0x84 = PI_KIND|PI_WIDTH
+        0x00,                             # media‑type (auto) -> 0
+        spec["media_byte"],               # WIDTH byte
+        0x00, 0xAA,0x02,0x00,0x00,0x00,0x00))
+
+    # mode: auto‑cut on
+    data.append(b"\x1B\x69\x4D\x40")
+
+    # advanced mode: hi‑res if asked, *chain printing* (bit 3 = 0)
+    adv = 0x40 if hi_res else 0x00        # bit 6
+    data.append(b"\x1B\x69\x4B" + bytes([adv]))
+
+    # feed margin  ESC i d  (same front & back)
+    dots_per_mm = spec["pins"] / spec["mm"]
+    margin_dots = int(dots_per_mm * feed_mm)
+    data.append(b"\x1B\x69\x64" + struct.pack("<H", margin_dots))
+
+    # enable TIFF compression
+    data.append(b"\x4D\x02")
+
+    # graphics rows (one per X pixel)
+    pins_total = 128                      # print‑head columns
+    blank_left = (pins_total - spec["pins"]) // 2
+
+    for x in range(w):
+        row = bytearray(20)
+        row[:4] = b"\x47\x11\x00\x0F"     # 'G' row header
+        for y in range(h):
+            if matrix["data"][y][x]:
+                bitpos = y + blank_left
+                byte = 4 + bitpos//8
+                row[byte] |= 1 << (7 - (bitpos % 8))
+        data.append(bytes(row))
+
+    data.append(b"\x1A")                  # CTRL‑Z = print+feed
+    return b"".join(data)
+
+# ──────────────────────────────────────────────────────────────
+async def send_via_ipp(binary, copies, printer="192.168.1.175"):
+    async with IPP(host=printer, port=631, base_path="/ipp/print") as ipp:
+        msg = {"operation-attributes-tag":
+                   {"requesting-user-name":"python",
+                    "job-name":"png_label",
+                    "document-format":"application/octet-stream"},
+               "job-attributes-tag": {"copies": copies,
+                                      "sides":"one-sided",
+                                      "orientation-requested":4},
+               "data": binary}
+        res = await ipp.execute(IppOperation.PRINT_JOB, msg)
+        return res.get("status-code",‑1)==0
+
+# ──────────────────────────────────────────────────────────────
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("text",           help="label text, quotes for spaces")
+    ap.add_argument("-f","--font",    type=int, default=40,
+                    help="font size px (default 40)")
+    ap.add_argument("-t","--tape",    default="W6",
+                    choices=TAPE_SPECS.keys(), help="tape cassette")
+    ap.add_argument("-m","--margin",  type=int, default=10,
+                    help="left/right margin inside label in px")
+    ap.add_argument("-c","--copies",  type=int, default=1)
+    args = ap.parse_args()
+
+    png, spec = create_label_png(args.text, args.font,
+                                 args.tape, args.margin)
+    png.save(f"{args.tape}_{args.text.replace(' ','_')}.png")
+
+    matrix = png_to_bw_matrix(png)
+    raster = convert_to_brother_raster(matrix, spec, hi_res=True)
+    open(f"{args.tape}_{args.text.replace(' ','_')}.bin","wb").write(raster)
+
+    ok = asyncio.run(send_via_ipp(raster, args.copies))
+    print("✓ printed" if ok else "✗ failed")
 
 if __name__ == "__main__":
     main()
