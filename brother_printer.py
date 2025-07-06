@@ -12,6 +12,7 @@ import struct
 import argparse
 import socket
 import time
+import os
 from PIL import Image, ImageDraw, ImageFont
 from pyipp import IPP
 from pyipp.enums import IppOperation
@@ -287,8 +288,10 @@ async def detect_tape_size(printer_ip):
 
 # ──────────────────────────────────────────────────────────────
 # IPP communication
-async def send_via_ipp(binary, copies, printer="192.168.1.175"):
+async def send_via_ipp(binary, copies, printer=None):
     """Send Brother raster data via IPP"""
+    if printer is None:
+        raise ValueError("Printer IP address must be specified")
     async with IPP(host=printer, port=631, base_path="/ipp/print") as ipp:
         msg = {"operation-attributes-tag":
                    {"requesting-user-name":"python",
@@ -343,11 +346,25 @@ def main():
             if len(printers) > 1:
                 print(f"Note: Found {len(printers)} printers, using first one")
         else:
-            print("⚠ No Brother printers found, using default IP")
-            printer_ip = "192.168.1.175"
+            # Try environment variable, then error if not found
+            default_ip = os.getenv('BROTHER_PRINTER_IP')
+            if default_ip:
+                print(f"⚠ No Brother printers found, using BROTHER_PRINTER_IP: {default_ip}")
+                printer_ip = default_ip
+            else:
+                print("❌ No Brother printers found and no default IP configured")
+                print("Set BROTHER_PRINTER_IP environment variable or use --printer option")
+                sys.exit(1)
     elif not printer_ip:
-        print("No printer IP specified, using default")
-        printer_ip = "192.168.1.175"
+        # Try environment variable, then error if not found
+        default_ip = os.getenv('BROTHER_PRINTER_IP')
+        if default_ip:
+            print(f"No printer IP specified, using BROTHER_PRINTER_IP: {default_ip}")
+            printer_ip = default_ip
+        else:
+            print("❌ No printer IP specified and no default IP configured")
+            print("Set BROTHER_PRINTER_IP environment variable or use --printer option")
+            sys.exit(1)
     
     # Auto-detect tape size if not specified
     tape_size = args.tape

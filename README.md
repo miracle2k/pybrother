@@ -23,7 +23,11 @@ uv run brother_printer.py "Large Text" --font 60 --tape W12
 uv run brother_printer.py "White Label" --white-tape
 
 # Manual printer IP
-uv run brother_printer.py "Test" --printer 192.168.1.175
+uv run brother_printer.py "Test" --printer 192.168.1.100
+
+# Or set environment variable for default IP
+export BROTHER_PRINTER_IP=192.168.1.100
+uv run brother_printer.py "Test"
 ```
 
 ### Options
@@ -32,7 +36,7 @@ uv run brother_printer.py "Test" --printer 192.168.1.175
 - `--tape` - Tape size: W3_5, W6, W9, W12, W18, W24 (auto-detected)
 - `--margin` - Left/right margins in pixels (default: 10)
 - `--copies` - Number of copies (default: 1)
-- `--printer` - Printer IP address (auto-discovered)
+- `--printer` - Printer IP address (auto-discovered or from BROTHER_PRINTER_IP env var)
 - `--white-tape` - Use white tape with black text
 - `--mode` - Use `png` (default) or `labelprinterkit` mode
 
