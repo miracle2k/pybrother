@@ -28,6 +28,11 @@ try:
     ZEROCONF_AVAILABLE = True
 except ImportError:
     ZEROCONF_AVAILABLE = False
+    # Define dummy classes for when zeroconf is not available
+    class ServiceListener:
+        pass
+    ServiceBrowser = None
+    Zeroconf = None
 
 # ──────────────────────────────────────────────────────────────
 # Tape catalogue (data from Brother "Raster Command Reference")
