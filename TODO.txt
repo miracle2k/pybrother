@@ -1,0 +1,8 @@
+- [ ] Merge the two python print files such that there is a choice on the CLI which of the two modes to use, and that the library dependency is optional and only imported when that module is chosen.
+
+- [ ] the script should auto-select the right tape size based on what the printer exposes. the flow would always be to first check the printer for config, then auto-select the right settings.
+
+
+- [ ] add support for auto-detecting the printer IP using mDNS. it can be specified to override.
+
+- [ ] Add support for white tapes, when we need to print black.
