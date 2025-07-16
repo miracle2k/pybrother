@@ -136,7 +136,7 @@ def png_to_bw_matrix(img, threshold=128):
     return {"width": w, "height": h, "data": data}
 
 
-def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=1, auto_cut=True):
+def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2, auto_cut=True):
     """Convert matrix to Brother raster format
     
     CRITICAL: This function contains the exact byte sequence required for Brother P-touch
@@ -212,12 +212,12 @@ def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=1, auto_cut=Tru
     # MARGIN (FEED) AMOUNT - ESC i d (0x1B 0x69 0x64)
     # Sets how much tape to feed before/after printing
     # Critical for proper label appearance and cutting position
-    # High-res: 28 dots (2mm), Standard: 14 dots (2mm)
-    # This ensures the label has proper margins and cuts in the right place
-    if hi_res:
-        margin_dots = 28  # 14 pixels/mm * 2mm = 28 dots
-    else:
-        margin_dots = 14  # 7 pixels/mm * 2mm = 14 dots
+    # Uses fixed dots per mm: 14 for high-res (360 dpi), 7 for standard (180 dpi)
+    # Default 2mm provides good balance - enough margin for clean cuts
+    # Valid range: 0.5-5mm (too small = cuts through text, too large = wastes tape)
+    # Working values: 2mm (28 dots hi-res) verified to work perfectly
+    dots_per_mm = 14 if hi_res else 7
+    margin_dots = int(dots_per_mm * feed_mm)
     data.append(b"\x1b\x69\x64" + struct.pack("<H", margin_dots))
 
     # COMPRESSION MODE - M 02 (0x4D 0x02)
@@ -678,7 +678,7 @@ def main():
 
         matrix = png_to_bw_matrix(png)
         raster = convert_to_brother_raster(
-            matrix, spec, hi_res=True, feed_mm=1, auto_cut=args.auto_cut
+            matrix, spec, hi_res=True, auto_cut=args.auto_cut
         )
 
         bin_filename = f"{tape_size}_{sanitize_filename(args.text)}.bin"
