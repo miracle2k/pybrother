@@ -290,7 +290,7 @@ class PassivePrinterListener(ServiceListener):
         self.add_service(zeroconf, service_type, name)
 
 
-def discover_with_passive_listening(timeout=30, verbose=False):
+def discover_with_passive_listening(timeout=70, verbose=False):
     """Enhanced discovery using passive mDNS listening for unsolicited announcements
     
     This method implements the insights from mDNS analysis:
@@ -299,7 +299,7 @@ def discover_with_passive_listening(timeout=30, verbose=False):
     - Accepts any well-formed mDNS packet, not just replies to queries
     
     Args:
-        timeout: How long to listen for announcements (default 30s)
+        timeout: How long to listen for announcements (default 70s)
         verbose: Show detailed discovery messages
         
     Returns:
@@ -310,8 +310,8 @@ def discover_with_passive_listening(timeout=30, verbose=False):
         return []
 
     if verbose:
-        print(f"Passive listening for Brother printer announcements ({timeout}s timeout)...")
-        print("Brother printers announce themselves every ~60 seconds")
+        print(f"Listening for Brother printer mDNS announcements ({timeout}s timeout)...")
+        print("Note: Brother printers typically announce themselves every ~60 seconds")
     
     try:
         # Use IPv4-only to match Brother printer behavior (192.168.x.x → 224.0.0.251:5353)
@@ -320,9 +320,6 @@ def discover_with_passive_listening(timeout=30, verbose=False):
 
         # Create browser that will accept unsolicited announcements
         browser = ServiceBrowser(zeroconf, "_ipp._tcp.local.", listener)
-        
-        if verbose:
-            print("Listening for mDNS announcements...")
         
         # Wait for announcements (Brother printers announce every ~60s with 4min TTL)
         time.sleep(timeout)
@@ -507,8 +504,8 @@ def main():
     ap.add_argument(
         "--listen-timeout",
         type=int,
-        default=30,
-        help="timeout for passive listening in seconds (default: 30s)",
+        default=70,
+        help="timeout for passive listening in seconds (default: 70s)",
     )
 
     args = ap.parse_args()
@@ -537,8 +534,6 @@ def main():
     if not printer_ip:
         if args.listen:
             # Use passive listening discovery
-            print(f"Passive listening for Brother printer announcements ({args.listen_timeout}s)...")
-            print("Brother printers announce every ~60 seconds")
             printers = discover_with_passive_listening(timeout=args.listen_timeout, verbose=True)
             
             if printers:
