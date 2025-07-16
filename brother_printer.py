@@ -73,13 +73,8 @@ def sanitize_filename(text):
 
 # ──────────────────────────────────────────────────────────────
 # PNG-based implementation
-def create_label_png(text, font_size, tape_key, margin_px, white_tape=False):
-    """Create PNG with perfect symmetric centering using ink-based measurement
-
-    Args:
-        white_tape: If True, creates white background with black text (for white tapes)
-                   If False, creates black background with white text (for black tapes)
-    """
+def create_label_png(text, font_size, tape_key, margin_px):
+    """Create PNG with perfect symmetric centering using ink-based measurement"""
     spec = TAPE_SPECS[tape_key]
     tape_h_px = spec["pins"]
 
@@ -105,14 +100,14 @@ def create_label_png(text, font_size, tape_key, margin_px, white_tape=False):
     canvas_h = tape_h_px
 
     # Set colors based on tape type
-    if white_tape:
-        # White tape: white background (255), black text (0)
-        bg_color = 255
-        text_color = 0
-    else:
-        # Black tape: black background (0), white text (255)
-        bg_color = 0
-        text_color = 255
+    # IMPORTANT: We always create the image as if printing on white tape
+    # The printer handles the inversion for black tape automatically
+    # Dark pixels (0) → thermal head activates → black on white tape, white on black tape
+    # Light pixels (255) → thermal head doesn't activate → white on white tape, black on black tape
+    
+    # Always use white background with black text
+    bg_color = 255  # White background
+    text_color = 0  # Black text
 
     img = Image.new("L", (canvas_w, canvas_h), bg_color)
     draw = ImageDraw.Draw(img)
@@ -125,10 +120,24 @@ def create_label_png(text, font_size, tape_key, margin_px, white_tape=False):
 
 
 def png_to_bw_matrix(img, threshold=128):
-    """Convert PNG to black/white matrix"""
+    """Convert PNG to black/white matrix
+    
+    IMPORTANT: The matrix represents what to PRINT, not the final appearance:
+    - 1 = print a dot (thermal head activates)
+    - 0 = don't print (thermal head doesn't activate)
+    
+    On white tape: printing dots makes it black (so 1 = black result)
+    On black tape: printing dots makes it white (so 1 = white result)
+    
+    Therefore we need to handle the logic based on what we want to PRINT,
+    not what color we want to see.
+    """
     if img.mode != "L":
         img = img.convert("L")
     w, h = img.size
+    
+    # For Brother printers: pixels < threshold should be printed
+    # This works correctly: dark pixels in image → print dots
     data = [
         [1 if img.getpixel((x, y)) < threshold else 0 for x in range(w)]
         for y in range(h)
@@ -276,7 +285,7 @@ def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2, auto_cut=Tru
 # ──────────────────────────────────────────────────────────────
 # Labelprinterkit-based implementation
 def print_with_labelprinterkit(
-    text, font_size, tape_key, margin_px, copies, printer_ip, white_tape=False
+    text, font_size, tape_key, margin_px, copies, printer_ip
 ):
     """Print using labelprinterkit library"""
     if not LABELPRINTERKIT_AVAILABLE:
@@ -285,7 +294,7 @@ def print_with_labelprinterkit(
         )
 
     # Create PNG using same centering logic
-    png, spec = create_label_png(text, font_size, tape_key, margin_px, white_tape)
+    png, spec = create_label_png(text, font_size, tape_key, margin_px)
 
     # Save PNG for reference
     filename = f"{tape_key}_{sanitize_filename(text)}_labelprinterkit.png"
@@ -573,11 +582,6 @@ def main():
         help="disable auto-detection of tape size",
     )
     ap.add_argument(
-        "--white-tape",
-        action="store_true",
-        help="use white tape mode (black text on white background)",
-    )
-    ap.add_argument(
         "--listen",
         action="store_true", 
         help="discover printer via passive mDNS listening (waits for printer announcements every ~60s)",
@@ -654,9 +658,8 @@ def main():
         print("No tape size specified, defaulting to W6")
         tape_size = "W6"
 
-    tape_type = "white" if args.white_tape else "black"
     print(
-        f"Text: '{args.text}' | Font: {args.font}px | Tape: {tape_size} ({tape_type})"
+        f"Text: '{args.text}' | Font: {args.font}px | Tape: {tape_size}"
     )
 
     if args.mode == "labelprinterkit":
@@ -674,7 +677,6 @@ def main():
                 args.margin,
                 args.copies,
                 printer_ip,
-                args.white_tape,
             )
             print("✓ printed" if success else "✗ failed")
         except Exception as e:
@@ -683,7 +685,7 @@ def main():
 
     else:  # PNG mode
         png, spec = create_label_png(
-            args.text, args.font, tape_size, args.margin, args.white_tape
+            args.text, args.font, tape_size, args.margin
         )
         filename = f"{tape_size}_{sanitize_filename(args.text)}.png"
         png.save(filename)
