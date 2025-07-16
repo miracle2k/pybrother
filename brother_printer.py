@@ -513,6 +513,23 @@ def main():
 
     args = ap.parse_args()
 
+    # Validate input arguments
+    if args.font <= 0 or args.font > 200:
+        print("Error: Font size must be between 1 and 200")
+        sys.exit(1)
+    
+    if args.margin < 0 or args.margin > 100:
+        print("Error: Margin must be between 0 and 100")
+        sys.exit(1)
+    
+    if args.copies <= 0 or args.copies > 10:
+        print("Error: Copies must be between 1 and 10")
+        sys.exit(1)
+    
+    if args.listen_timeout <= 0 or args.listen_timeout > 300:
+        print("Error: Listen timeout must be between 1 and 300 seconds")
+        sys.exit(1)
+
     print(f"Brother Label Printer - Mode: {args.mode}")
 
     # Get printer IP: either specified, discovered via passive listening, or from env var
