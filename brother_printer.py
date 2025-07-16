@@ -230,6 +230,8 @@ def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2, auto_cut=Tru
     adv = 0x0C  # CRITICAL: Base value must be 0x0C, not 0x00!
     if hi_res:
         adv |= 0x40  # Set bit 6 for high resolution
+    if not auto_cut:
+        adv |= 0x08  # Set bit 3 for no chain printing
     data.append(b"\x1b\x69\x4b" + bytes([adv]))
 
     # MARGIN (FEED) AMOUNT - ESC i d (0x1B 0x69 0x64)
