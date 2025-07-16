@@ -602,7 +602,8 @@ def main():
         )
 
         bin_filename = f"{tape_size}_{sanitize_filename(args.text)}.bin"
-        open(bin_filename, "wb").write(raster)
+        with open(bin_filename, "wb") as f:
+            f.write(raster)
         print(f"✓ Saved binary: {bin_filename}")
 
         ok = asyncio.run(send_via_ipp(raster, args.copies, printer_ip))
