@@ -340,7 +340,7 @@ def discover_with_passive_listening(timeout=30, verbose=False):
         try:
             browser.cancel()
             zeroconf.close()
-        except:
+        except Exception:
             pass
 
 
