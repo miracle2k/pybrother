@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Universal Brother Label Printer
-Supports both PNG-based and labelprinterkit-based printing modes
 Works with W3.5 • W6 • W9 • W12 • W18 • W24 tapes
 
 Font sizing:
@@ -30,13 +29,6 @@ from pyipp import IPP
 from pyipp.enums import IppOperation
 
 # Try importing optional dependencies
-try:
-    from labelprinterkit import BrotherQLPrinter
-
-    LABELPRINTERKIT_AVAILABLE = True
-except ImportError:
-    LABELPRINTERKIT_AVAILABLE = False
-
 try:
     from zeroconf import ServiceBrowser, ServiceListener, Zeroconf, IPVersion
 
@@ -305,35 +297,6 @@ def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2, auto_cut=Tru
 
 
 # ──────────────────────────────────────────────────────────────
-# Labelprinterkit-based implementation
-def print_with_labelprinterkit(
-    text, font_size, tape_key, margin_px, copies, printer_ip
-):
-    """Print using labelprinterkit library"""
-    if not LABELPRINTERKIT_AVAILABLE:
-        raise ImportError(
-            "labelprinterkit not available. Install with: pip install labelprinterkit"
-        )
-
-    # Create PNG using same centering logic
-    png, spec = create_label_png(text, font_size, tape_key, margin_px)
-
-    # Save PNG for reference
-    filename = f"{tape_key}_{sanitize_filename(text)}_labelprinterkit.png"
-    png.save(filename)
-    print(f"✓ Saved PNG: {filename}")
-
-    # Use labelprinterkit to print
-    printer = BrotherQLPrinter(f"ipp://{printer_ip}:631/ipp/print")
-
-    # Convert tape key to labelprinterkit format
-    tape_size = tape_key.replace("_", ".")  # W6 -> W6, W3_5 -> W3.5
-
-    success = printer.print_image(png, tape_size=tape_size, copies=copies)
-    return success
-
-
-# ──────────────────────────────────────────────────────────────
 # Auto-discovery functions
 class PassivePrinterListener(ServiceListener):
     """Enhanced listener for passive mDNS discovery - listens for unsolicited announcements"""
@@ -585,12 +548,6 @@ def main():
         help="printer IP address (required unless using --listen or BROTHER_PRINTER_IP env var)",
     )
     ap.add_argument(
-        "--mode",
-        choices=["png", "labelprinterkit"],
-        default="png",
-        help="printing mode: png (built-in) or labelprinterkit (library)",
-    )
-    ap.add_argument(
         "--auto-cut",
         action="store_true",
         default=True,
@@ -635,7 +592,7 @@ def main():
         print("Error: Listen timeout must be between 1 and 300 seconds")
         sys.exit(1)
 
-    print(f"Brother Label Printer - Mode: {args.mode}")
+    print("Brother Label Printer")
 
     # Get printer IP: either specified, discovered via passive listening, or from env var
     printer_ip = args.printer
@@ -686,47 +643,26 @@ def main():
         f"Text: '{args.text}' | Font: {font_display} | Tape: {tape_size}"
     )
 
-    if args.mode == "labelprinterkit":
-        if not LABELPRINTERKIT_AVAILABLE:
-            print("❌ labelprinterkit not available")
-            print("Install with: pip install labelprinterkit")
-            print("Or use --mode png for built-in PNG mode")
-            sys.exit(1)
+    # PNG mode is now the only mode
+    png, spec = create_label_png(
+        args.text, args.font, tape_size, args.margin
+    )
+    filename = f"{tape_size}_{sanitize_filename(args.text)}.png"
+    png.save(filename)
+    print(f"✓ Saved PNG: {filename}")
 
-        try:
-            success = print_with_labelprinterkit(
-                args.text,
-                args.font,
-                tape_size,
-                args.margin,
-                args.copies,
-                printer_ip,
-            )
-            print("✓ printed" if success else "✗ failed")
-        except Exception as e:
-            print(f"✗ labelprinterkit error: {e}")
-            sys.exit(1)
+    matrix = png_to_bw_matrix(png)
+    raster = convert_to_brother_raster(
+        matrix, spec, hi_res=True, auto_cut=args.auto_cut
+    )
 
-    else:  # PNG mode
-        png, spec = create_label_png(
-            args.text, args.font, tape_size, args.margin
-        )
-        filename = f"{tape_size}_{sanitize_filename(args.text)}.png"
-        png.save(filename)
-        print(f"✓ Saved PNG: {filename}")
+    bin_filename = f"{tape_size}_{sanitize_filename(args.text)}.bin"
+    with open(bin_filename, "wb") as f:
+        f.write(raster)
+    print(f"✓ Saved binary: {bin_filename}")
 
-        matrix = png_to_bw_matrix(png)
-        raster = convert_to_brother_raster(
-            matrix, spec, hi_res=True, auto_cut=args.auto_cut
-        )
-
-        bin_filename = f"{tape_size}_{sanitize_filename(args.text)}.bin"
-        with open(bin_filename, "wb") as f:
-            f.write(raster)
-        print(f"✓ Saved binary: {bin_filename}")
-
-        ok = asyncio.run(send_via_ipp(raster, args.copies, printer_ip))
-        print("✓ printed" if ok else "✗ failed")
+    ok = asyncio.run(send_via_ipp(raster, args.copies, printer_ip))
+    print("✓ printed" if ok else "✗ failed")
 
 
 if __name__ == "__main__":
