@@ -3,6 +3,11 @@
 Universal Brother Label Printer
 Supports both PNG-based and labelprinterkit-based printing modes
 Works with W3.5 • W6 • W9 • W12 • W18 • W24 tapes
+
+Printer discovery options:
+- Manual IP: --printer 192.168.1.175 (fastest)
+- Passive listening: --listen (waits for printer announcements every ~60s)
+- Environment variable: export BROTHER_PRINTER_IP=192.168.1.175
 """
 
 import argparse
@@ -27,7 +32,7 @@ except ImportError:
     LABELPRINTERKIT_AVAILABLE = False
 
 try:
-    from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
+    from zeroconf import ServiceBrowser, ServiceListener, Zeroconf, IPVersion
 
     ZEROCONF_AVAILABLE = True
 except ImportError:
@@ -39,6 +44,7 @@ except ImportError:
 
     ServiceBrowser = None
     Zeroconf = None
+    IPVersion = None
 
 # ──────────────────────────────────────────────────────────────
 # Tape catalogue (data from Brother "Raster Command Reference")
@@ -215,150 +221,105 @@ def print_with_labelprinterkit(
 
 # ──────────────────────────────────────────────────────────────
 # Auto-discovery functions
-class PrinterDiscoveryListener(ServiceListener):
-    """Zeroconf service listener for Brother printers"""
-
-    def __init__(self):
+class PassivePrinterListener(ServiceListener):
+    """Enhanced listener for passive mDNS discovery - listens for unsolicited announcements"""
+    
+    def __init__(self, verbose=False):
         self.printers = []
-
+        self.verbose = verbose
+        self.found_event = None  # Will be set to asyncio.Event for async usage
+    
     def add_service(self, zeroconf, service_type, name):
-        info = zeroconf.get_service_info(service_type, name)
-        if info and "brother" in name.lower():
-            # Extract IP address
-            if info.addresses:
-                ip = socket.inet_ntoa(info.addresses[0])
-                printer_info = {
-                    "name": name,
-                    "ip": ip,
-                    "port": info.port,
-                    "properties": info.properties,
-                }
-                self.printers.append(printer_info)
-                print(f"Found Brother printer: {name} at {ip}:{info.port}")
+        # Only process IPP services to avoid errors
+        if "_ipp._tcp" not in service_type:
+            return
+            
+        if self.verbose:
+            print(f"Detected service: {name}")
+        
+        # Get service info with error handling
+        try:
+            info = zeroconf.get_service_info(service_type, name, timeout=3000)
+            if info and "brother" in name.lower():
+                # Extract IP address
+                if info.addresses:
+                    ip = socket.inet_ntoa(info.addresses[0])
+                    printer_info = {
+                        "name": name.replace("._ipp._tcp.local.", ""),
+                        "ip": ip,
+                        "port": info.port,
+                        "properties": info.properties,
+                    }
+                    self.printers.append(printer_info)
+                    if self.verbose:
+                        print(f"✓ Found Brother printer: {printer_info['name']} at {ip}:{info.port}")
+                    
+                    # Signal that we found a printer (for async usage)
+                    if self.found_event:
+                        self.found_event.set()
+                        
+        except Exception as e:
+            if self.verbose:
+                print(f"Error getting service info for {name}: {e}")
 
     def remove_service(self, zeroconf, service_type, name):
-        pass
+        if self.verbose and "brother" in name.lower():
+            print(f"Brother printer removed: {name}")
 
     def update_service(self, zeroconf, service_type, name):
-        pass
+        # Treat updates as new additions
+        self.add_service(zeroconf, service_type, name)
 
 
-def discover_brother_printers(timeout=5):
-    """Discover Brother printers using zeroconf with dns-sd fallback"""
-    # Try zeroconf first (now working)
-    printers = discover_with_zeroconf(timeout)
-    if printers:
-        return printers
+def discover_with_passive_listening(timeout=30, verbose=False):
+    """Enhanced discovery using passive mDNS listening for unsolicited announcements
     
-    # Fallback to dns-sd on macOS if zeroconf fails
-    if platform.system() == "Darwin":
-        return discover_with_dns_sd(timeout)
+    This method implements the insights from mDNS analysis:
+    - Listens passively for unsolicited printer announcements (every ~60s)
+    - Uses IPv4-only to match Brother printer behavior 
+    - Accepts any well-formed mDNS packet, not just replies to queries
     
-    return []
-
-
-def discover_with_dns_sd(timeout=3):
-    """Use system dns-sd command to discover Brother printers (macOS only)"""
-    print(f"Scanning for Brother printers using dns-sd ({timeout}s timeout)...")
-    
-    import subprocess
-    
-    try:
-        # Run dns-sd browse for a short time and capture all output
-        print("Running dns-sd browse...")
-        result = subprocess.run([
-            "timeout", str(timeout), "dns-sd", "-B", "_ipp._tcp", "local"
-        ], capture_output=True, text=True, timeout=timeout+1)
+    Args:
+        timeout: How long to listen for announcements (default 30s)
+        verbose: Show detailed discovery messages
         
-        # Parse the output to find Brother printers
-        brother_services = []
-        for line in result.stdout.split('\n'):
-            if line.strip():
-                # Look for Brother services: "21:51:53.827  Add        2  14 local.               _ipp._tcp.           Brother PT-P750W"
-                if 'Add' in line and '_ipp._tcp.' in line and 'brother' in line.lower():
-                    parts = line.split()
-                    if len(parts) >= 6:
-                        # Everything after "_ipp._tcp." is the service name
-                        service_name = ' '.join(parts[6:])
-                        brother_services.append(service_name)
-                        print(f"Found Brother service: {service_name}")
-        
-        # For each Brother service, lookup the details
-        printers = []
-        for service_name in brother_services:
-            print(f"Looking up service details for: {service_name}")
-            try:
-                lookup_result = subprocess.run([
-                    "timeout", "3", "dns-sd", "-L", service_name, "_ipp._tcp", "local"
-                ], capture_output=True, text=True, timeout=4)
-                
-                for line in lookup_result.stdout.split('\n'):
-                    if line.strip():
-                        if 'can be reached at' in line and '.local.:631' in line:
-                            # Parse: "Brother\032PT-P750W._ipp._tcp.local. can be reached at BRWCC5EF8CEA32E.local.:631"
-                            parts = line.split('can be reached at')
-                            if len(parts) >= 2:
-                                target_part = parts[1].strip()
-                                hostname_port = target_part.split()[0]
-                                if hostname_port.endswith(':631'):
-                                    hostname = hostname_port[:-4]
-                                    
-                                    try:
-                                        ip = socket.gethostbyname(hostname)
-                                        printer_info = {
-                                            "name": service_name,
-                                            "ip": ip,
-                                            "port": 631,
-                                            "properties": {},
-                                        }
-                                        printers.append(printer_info)
-                                        print(f"Found Brother printer: {service_name} at {ip}:631")
-                                        break
-                                    except socket.gaierror as e:
-                                        print(f"Error resolving {hostname}: {e}")
-                                        
-            except subprocess.TimeoutExpired:
-                print(f"Timeout looking up {service_name}")
-                continue
-            except Exception as e:
-                print(f"Error looking up {service_name}: {e}")
-                continue
-        
-        return printers
-        
-    except FileNotFoundError:
-        print("timeout or dns-sd command not found")
-        return []
-    except Exception as e:
-        print(f"dns-sd error: {e}")
-        return []
-
-
-def discover_with_zeroconf(timeout=5):
-    """Fallback discovery using zeroconf library"""
+    Returns:
+        List of discovered Brother printers
+    """
     if not ZEROCONF_AVAILABLE:
-        print("Warning: zeroconf not available for auto-discovery")
+        print("Warning: zeroconf not available for passive discovery")
         return []
 
-    print(f"Scanning for Brother printers using zeroconf ({timeout}s timeout)...")
+    if verbose:
+        print(f"Passive listening for Brother printer announcements ({timeout}s timeout)...")
+        print("Brother printers announce themselves every ~60 seconds")
     
     try:
-        zeroconf = Zeroconf()
-        listener = PrinterDiscoveryListener()
+        # Use IPv4-only to match Brother printer behavior (192.168.x.x → 224.0.0.251:5353)
+        zeroconf = Zeroconf(ip_version=IPVersion.V4Only)
+        listener = PassivePrinterListener(verbose=verbose)
 
-        # Focus on IPP services
+        # Create browser that will accept unsolicited announcements
         browser = ServiceBrowser(zeroconf, "_ipp._tcp.local.", listener)
         
-        # Wait for discovery
+        if verbose:
+            print("Listening for mDNS announcements...")
+        
+        # Wait for announcements (Brother printers announce every ~60s with 4min TTL)
         time.sleep(timeout)
+        
+        if verbose:
+            print(f"Passive listening completed. Found {len(listener.printers)} Brother printer(s)")
         
         return listener.printers
 
     except Exception as e:
-        print(f"Zeroconf discovery failed: {e}")
+        if verbose:
+            print(f"Passive discovery failed: {e}")
         return []
     finally:
         try:
+            browser.cancel()
             zeroconf.close()
         except:
             pass
@@ -492,7 +453,7 @@ def main():
         "-p",
         "--printer",
         default=None,
-        help="printer IP address (auto-discovered if not specified)",
+        help="printer IP address (required unless using --listen or BROTHER_PRINTER_IP env var)",
     )
     ap.add_argument(
         "--mode",
@@ -515,53 +476,56 @@ def main():
         help="disable auto-detection of tape size",
     )
     ap.add_argument(
-        "--no-discover",
-        action="store_true",
-        help="disable auto-discovery of printer IP",
-    )
-    ap.add_argument(
         "--white-tape",
         action="store_true",
         help="use white tape mode (black text on white background)",
+    )
+    ap.add_argument(
+        "--listen",
+        action="store_true", 
+        help="discover printer via passive mDNS listening (waits for printer announcements every ~60s)",
+    )
+    ap.add_argument(
+        "--listen-timeout",
+        type=int,
+        default=30,
+        help="timeout for passive listening in seconds (default: 30s)",
     )
 
     args = ap.parse_args()
 
     print(f"Brother Label Printer - Mode: {args.mode}")
 
-    # Auto-discover printer IP if not specified
+    # Get printer IP: either specified, discovered via passive listening, or from env var
     printer_ip = args.printer
-    if not printer_ip and not args.no_discover:
-        print("Auto-discovering Brother printers...")
-        printers = discover_brother_printers(timeout=5)
-        if printers:
-            printer_ip = printers[0]["ip"]
-            print(f"✓ Using printer: {printers[0]['name']} at {printer_ip}")
-            if len(printers) > 1:
-                print(f"Note: Found {len(printers)} printers, using first one")
-        else:
-            # Try environment variable, then error if not found
-            default_ip = os.getenv("BROTHER_PRINTER_IP")
-            if default_ip:
-                print(
-                    f"⚠ No Brother printers found, using BROTHER_PRINTER_IP: {default_ip}"
-                )
-                printer_ip = default_ip
+    if not printer_ip:
+        if args.listen:
+            # Use passive listening discovery
+            print(f"Passive listening for Brother printer announcements ({args.listen_timeout}s)...")
+            print("Brother printers announce every ~60 seconds")
+            printers = discover_with_passive_listening(timeout=args.listen_timeout, verbose=True)
+            
+            if printers:
+                printer_ip = printers[0]["ip"]
+                print(f"✓ Using printer: {printers[0]['name']} at {printer_ip}")
+                if len(printers) > 1:
+                    print(f"Note: Found {len(printers)} printers, using first one")
             else:
-                print("❌ No Brother printers found and no default IP configured")
-                print(
-                    "Set BROTHER_PRINTER_IP environment variable or use --printer option"
-                )
-                sys.exit(1)
-    elif not printer_ip:
-        # Try environment variable, then error if not found
-        default_ip = os.getenv("BROTHER_PRINTER_IP")
-        if default_ip:
-            print(f"No printer IP specified, using BROTHER_PRINTER_IP: {default_ip}")
-            printer_ip = default_ip
+                print("❌ No Brother printers found during passive listening")
+                print("Tip: Increase --listen-timeout (try 60-90s) or specify IP with --printer")
         else:
-            print("❌ No printer IP specified and no default IP configured")
-            print("Set BROTHER_PRINTER_IP environment variable or use --printer option")
+            # Try environment variable
+            printer_ip = os.getenv("BROTHER_PRINTER_IP")
+            if printer_ip:
+                print(f"Using BROTHER_PRINTER_IP: {printer_ip}")
+            
+        # If still no IP, show helpful error
+        if not printer_ip:
+            print("❌ No printer IP specified")
+            print("Options:")
+            print("  1. Specify IP directly: --printer 192.168.1.175")
+            print("  2. Use passive discovery: --listen (waits for announcements)")
+            print("  3. Set environment variable: export BROTHER_PRINTER_IP=192.168.1.175")
             sys.exit(1)
 
     # Auto-detect tape size if not specified
