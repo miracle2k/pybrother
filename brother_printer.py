@@ -4,6 +4,11 @@ Universal Brother Label Printer
 Supports both PNG-based and labelprinterkit-based printing modes
 Works with W3.5 • W6 • W9 • W12 • W18 • W24 tapes
 
+Font sizing:
+- Font size is specified in pixels (dots at 360 dpi)
+- Default: auto-sizes to 75% of tape height for safe fit
+- Manual: use -f/--font to specify exact pixel size
+
 Printer discovery options:
 - Manual IP: --printer 192.168.1.175 (fastest)
 - Passive listening: --listen (waits for printer announcements every ~60s)
@@ -74,9 +79,26 @@ def sanitize_filename(text):
 # ──────────────────────────────────────────────────────────────
 # PNG-based implementation
 def create_label_png(text, font_size, tape_key, margin_px):
-    """Create PNG with perfect symmetric centering using ink-based measurement"""
+    """Create PNG with perfect symmetric centering using ink-based measurement
+    
+    Font size is specified in pixels (dots at 360 dpi). Tape heights in pixels:
+    - W3.5 (3.5mm): 24 pixels
+    - W6 (6mm): 32 pixels  
+    - W9 (9mm): 50 pixels
+    - W12 (12mm): 70 pixels
+    - W18 (18mm): 112 pixels
+    - W24 (24mm): 128 pixels
+    
+    If font_size is None, automatically selects size based on tape width.
+    """
     spec = TAPE_SPECS[tape_key]
     tape_h_px = spec["pins"]
+    
+    # Auto-size font if not specified
+    if font_size is None:
+        # Use 75% of tape height for safe fit with ascenders/descenders
+        font_size = int(tape_h_px * 0.75)
+        print(f"Auto-selected font size: {font_size}px for {tape_key} tape ({tape_h_px}px height)")
 
     # Choose font
     try:
@@ -538,7 +560,8 @@ def main():
     ap = argparse.ArgumentParser(description="Universal Brother Label Printer")
     ap.add_argument("text", help="label text, quotes for spaces")
     ap.add_argument(
-        "-f", "--font", type=int, default=40, help="font size px (default 40)"
+        "-f", "--font", type=int, default=None, 
+        help="font size in pixels/dots (default: auto-size based on tape width)"
     )
     ap.add_argument(
         "-t",
@@ -596,7 +619,7 @@ def main():
     args = ap.parse_args()
 
     # Validate input arguments
-    if args.font <= 0 or args.font > 200:
+    if args.font is not None and (args.font <= 0 or args.font > 200):
         print("Error: Font size must be between 1 and 200")
         sys.exit(1)
     
@@ -658,8 +681,9 @@ def main():
         print("No tape size specified, defaulting to W6")
         tape_size = "W6"
 
+    font_display = "auto" if args.font is None else f"{args.font}px"
     print(
-        f"Text: '{args.text}' | Font: {args.font}px | Tape: {tape_size}"
+        f"Text: '{args.text}' | Font: {font_display} | Tape: {tape_size}"
     )
 
     if args.mode == "labelprinterkit":
