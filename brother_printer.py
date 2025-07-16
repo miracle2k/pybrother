@@ -137,67 +137,135 @@ def png_to_bw_matrix(img, threshold=128):
 
 
 def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=1, auto_cut=True):
-    """Convert matrix to Brother raster format"""
+    """Convert matrix to Brother raster format
+    
+    CRITICAL: This function contains the exact byte sequence required for Brother P-touch
+    printers to properly print, feed, and cut labels. Each command is essential and the
+    order matters. Missing commands (especially cut settings) will cause printing failures.
+    """
     w, h = matrix["width"], matrix["height"]
-    data = [
-        b"\x00" * 400,  # NULL * 400
-        b"\x1b\x40",  # ESC @
-        b"\x1b\x69\x61\x01",
-    ]  # ESC i a 01 (raster mode)
+    data = []
+    
+    # INVALIDATE COMMAND - 400 NULL bytes
+    # This clears the printer's buffer and ensures a clean start
+    # Without this, previous print jobs may interfere
+    data.append(b"\x00" * 400)
+    
+    # INITIALIZE COMMAND - ESC @ (0x1B 0x40)
+    # Resets the printer to default settings
+    # Essential for consistent printing behavior
+    data.append(b"\x1b\x40")
+    
+    # SWITCH TO RASTER MODE - ESC i a 01 (0x1B 0x69 0x61 0x01)
+    # Tells printer to expect raster graphics data
+    # Mode 01 = raster mode (required for P-touch label printers)
+    data.append(b"\x1b\x69\x61\x01")
 
-    # ESC i z – print-info (tell cassette width)
+    # PRINT INFORMATION COMMAND - ESC i z (0x1B 0x69 0x7A)
+    # This tells the printer critical information about the tape cassette
+    # Format: ESC i z <print info fields>
+    # Byte 3: 0x84 = PI_KIND|PI_WIDTH flags (tells printer we're specifying tape width)
+    # Byte 4: 0x00 = media type (0 = continuous tape)
+    # Byte 5: tape width identifier (0x06 for 6mm, 0x09 for 9mm, etc.)
+    # Bytes 6-12: reserved/padding bytes
     data.append(
         struct.pack(
             "<BBBBBBBBBBBBB",
-            0x1B,
-            0x69,
-            0x7A,  # ESC i z
-            0x84,  # 0x84 = PI_KIND|PI_WIDTH
-            0x00,  # media-type (auto) -> 0
-            spec["media_byte"],  # WIDTH byte
-            0x00,
-            0xAA,
-            0x02,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
+            0x1B,         # ESC
+            0x69,         # i
+            0x7A,         # z
+            0x84,         # flags: PI_KIND|PI_WIDTH
+            0x00,         # media type: continuous tape
+            spec["media_byte"],  # tape width (0x06=6mm, 0x09=9mm, etc.)
+            0x00,         # reserved
+            0xAA,         # fixed value
+            0x02,         # fixed value
+            0x00,         # reserved
+            0x00,         # reserved
+            0x00,         # reserved
+            0x00,         # reserved
         )
     )
 
-    # Mode: auto-cut setting
+    # AUTO CUT MODE - ESC i M @ (0x1B 0x69 0x4D 0x40)
+    # 0x40 = enable auto cut after printing
+    # Without this, the tape won't cut automatically
     if auto_cut:
         data.append(b"\x1b\x69\x4d\x40")
 
-    # Advanced mode: hi-res if asked, chain printing control
-    adv = 0x40 if hi_res else 0x00  # bit 6
-    if not auto_cut:
-        adv |= 0x08  # bit 3 = no-chain-printing
+    # CUT EVERY 1 LABEL - ESC i A 01 (0x1B 0x69 0x41 0x01)
+    # CRITICAL: This command was missing in broken versions!
+    # Tells printer to cut after every 1 label
+    # Without this, tape may not feed or cut properly
+    data.append(b"\x1b\x69\x41\x01")
+
+    # ADVANCED MODE SETTINGS - ESC i K (0x1B 0x69 0x4B)
+    # Controls print quality and behavior
+    # Base value 0x0C is critical - using 0x00 causes printing issues
+    # Bit 6 (0x40): 1 = high resolution (360 dpi), 0 = standard (180 dpi)
+    # Bit 3 (0x08): 1 = no chain printing, 0 = chain printing
+    adv = 0x0C  # CRITICAL: Base value must be 0x0C, not 0x00!
+    if hi_res:
+        adv |= 0x40  # Set bit 6 for high resolution
     data.append(b"\x1b\x69\x4b" + bytes([adv]))
 
-    # Feed margin ESC i d (same front & back)
-    dots_per_mm = spec["pins"] / spec["mm"]
-    margin_dots = int(dots_per_mm * feed_mm)
+    # MARGIN (FEED) AMOUNT - ESC i d (0x1B 0x69 0x64)
+    # Sets how much tape to feed before/after printing
+    # Critical for proper label appearance and cutting position
+    # High-res: 28 dots (2mm), Standard: 14 dots (2mm)
+    # This ensures the label has proper margins and cuts in the right place
+    if hi_res:
+        margin_dots = 28  # 14 pixels/mm * 2mm = 28 dots
+    else:
+        margin_dots = 14  # 7 pixels/mm * 2mm = 14 dots
     data.append(b"\x1b\x69\x64" + struct.pack("<H", margin_dots))
 
-    # Enable TIFF compression
+    # COMPRESSION MODE - M 02 (0x4D 0x02)
+    # Enables TIFF compression for raster data
+    # Required for P750W and similar models
+    # Reduces data size and improves reliability
     data.append(b"\x4d\x02")
 
-    # Graphics rows (one per X pixel)
-    pins_total = 128  # print-head columns
-    blank_left = (pins_total - spec["pins"]) // 2
+    # RASTER GRAPHICS DATA
+    # Each column of pixels is sent as a separate command
+    # The printer prints from right to left, so we send columns in order
+    pins_total = 128  # Brother print head has 128 pins (dots) vertically
+    blank_left = (pins_total - spec["pins"]) // 2  # Center the tape vertically
 
     for x in range(w):
+        # Each raster line is 20 bytes:
+        # - 3 bytes: command header (G 0x11 0x00)
+        # - 1 byte: TIFF compression info (0x0F = uncompressed)
+        # - 16 bytes: 128 bits for 128 print head pins
         row = bytearray(20)
-        row[:4] = b"\x47\x11\x00\x0f"  # 'G' row header
+        
+        # RASTER LINE COMMAND - G (0x47)
+        # 0x47 = 'G' command for graphics data
+        # 0x11 = 17 decimal = 16 data bytes + 1 TIFF byte
+        # 0x00 = high byte of length (not used)
+        # 0x0F = TIFF mode (uncompressed)
+        row[0] = 0x47  # 'G' command
+        row[1] = 0x11  # data length low byte (17 bytes follow)
+        row[2] = 0x00  # data length high byte
+        row[3] = 0x0F  # TIFF: uncompressed mode
+        
+        # Fill in the pixel data for this column
+        # Each bit represents one pin on the print head
+        # Bit = 1 means print (black), Bit = 0 means no print (white)
         for y in range(h):
-            if matrix["data"][y][x]:
-                bitpos = y + blank_left
-                byte = 4 + bitpos // 8
-                row[byte] |= 1 << (7 - (bitpos % 8))
+            if matrix["data"][y][x]:  # If pixel is black
+                bitpos = y + blank_left  # Position on the 128-pin print head
+                byte_index = 4 + (bitpos // 8)  # Which byte (4-19)
+                bit_offset = 7 - (bitpos % 8)   # Which bit (MSB first)
+                row[byte_index] |= 1 << bit_offset
+                
         data.append(bytes(row))
 
-    data.append(b"\x1a")  # CTRL-Z = print+feed
+    # PRINT COMMAND - CTRL-Z (0x1A)
+    # Tells printer to print the buffered data and feed/cut the label
+    # This is the final command that triggers the actual printing
+    data.append(b"\x1a")
+    
     return b"".join(data)
 
 
