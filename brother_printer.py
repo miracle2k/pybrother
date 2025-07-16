@@ -261,9 +261,17 @@ class PassivePrinterListener(ServiceListener):
                         "port": info.port,
                         "properties": info.properties,
                     }
-                    self.printers.append(printer_info)
-                    if self.verbose:
-                        print(f"✓ Found Brother printer: {printer_info['name']} at {ip}:{info.port}")
+                    
+                    # Check if this printer is already in our list
+                    already_found = any(p['ip'] == ip and p['port'] == info.port 
+                                      for p in self.printers)
+                    
+                    if not already_found:
+                        self.printers.append(printer_info)
+                        if self.verbose:
+                            print(f"✓ Found Brother printer: {printer_info['name']} at {ip}:{info.port}")
+                    elif self.verbose:
+                        print(f"  (Already discovered: {printer_info['name']} at {ip}:{info.port})")
                     
                     # Signal that we found a printer (for async usage)
                     if self.found_event:
