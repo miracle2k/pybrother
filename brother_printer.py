@@ -14,6 +14,7 @@ import argparse
 import asyncio
 import os
 import platform
+import re
 import socket
 import struct
 import sys
@@ -58,6 +59,16 @@ TAPE_SPECS = {
 }
 
 FEED_PX_PER_MM = 14  # ≅ 360 dpi
+
+
+# ──────────────────────────────────────────────────────────────
+# Utility functions
+def sanitize_filename(text):
+    """Remove dangerous characters from filename to prevent path traversal"""
+    # Keep only alphanumeric, spaces, hyphens, underscores
+    safe_text = re.sub(r'[^a-zA-Z0-9\s\-_]', '', text)
+    # Replace spaces with underscores
+    return safe_text.replace(' ', '_')[:50]  # Limit length to 50 chars
 
 
 # ──────────────────────────────────────────────────────────────
@@ -205,7 +216,7 @@ def print_with_labelprinterkit(
     png, spec = create_label_png(text, font_size, tape_key, margin_px, white_tape)
 
     # Save PNG for reference
-    filename = f"{tape_key}_{text.replace(' ', '_')}_labelprinterkit.png"
+    filename = f"{tape_key}_{sanitize_filename(text)}_labelprinterkit.png"
     png.save(filename)
     print(f"✓ Saved PNG: {filename}")
 
@@ -573,7 +584,7 @@ def main():
         png, spec = create_label_png(
             args.text, args.font, tape_size, args.margin, args.white_tape
         )
-        filename = f"{tape_size}_{args.text.replace(' ','_')}.png"
+        filename = f"{tape_size}_{sanitize_filename(args.text)}.png"
         png.save(filename)
         print(f"✓ Saved PNG: {filename}")
 
@@ -582,7 +593,7 @@ def main():
             matrix, spec, hi_res=True, feed_mm=1, auto_cut=args.auto_cut
         )
 
-        bin_filename = f"{tape_size}_{args.text.replace(' ','_')}.bin"
+        bin_filename = f"{tape_size}_{sanitize_filename(args.text)}.bin"
         open(bin_filename, "wb").write(raster)
         print(f"✓ Saved binary: {bin_filename}")
 
