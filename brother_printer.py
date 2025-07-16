@@ -216,9 +216,13 @@ def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2, auto_cut=Tru
     # Default 2mm provides good balance - enough margin for clean cuts
     # Valid range: 0.5-5mm (too small = cuts through text, too large = wastes tape)
     # Working values: 2mm (28 dots hi-res) verified to work perfectly
+    # NOTE: The format is actually <margin_low_byte> <margin_high_byte> (little-endian)
     dots_per_mm = 14 if hi_res else 7
     margin_dots = int(dots_per_mm * feed_mm)
-    data.append(b"\x1b\x69\x64" + struct.pack("<H", margin_dots))
+    # Pack as two separate bytes (low, high) instead of using struct.pack("<H")
+    margin_low = margin_dots & 0xFF
+    margin_high = (margin_dots >> 8) & 0xFF
+    data.append(b"\x1b\x69\x64" + bytes([margin_low, margin_high]))
 
     # COMPRESSION MODE - M 02 (0x4D 0x02)
     # Enables TIFF compression for raster data
@@ -493,6 +497,15 @@ async def send_via_ipp(binary, copies, printer=None):
     if printer is None:
         raise ValueError("Printer IP address must be specified")
     async with IPP(host=printer, port=631, base_path="/ipp/print") as ipp:
+        # Check printer status first - this can help recover stuck printers
+        try:
+            printer_info = await ipp.printer()
+            if printer_info.state.printer_state != "idle":
+                print(f"Warning: Printer state is '{printer_info.state.printer_state}', not idle")
+        except Exception as e:
+            # Don't fail if status check fails, just warn
+            print(f"Warning: Could not check printer status: {e}")
+        
         msg = {
             "operation-attributes-tag": {
                 "requesting-user-name": "python",
