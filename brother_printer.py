@@ -159,7 +159,7 @@ def png_to_bw_matrix(img, threshold=128):
     return {"width": w, "height": h, "data": data}
 
 
-def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2, auto_cut=True):
+def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2):
     """Convert matrix to Brother raster format
     
     CRITICAL: This function contains the exact byte sequence required for Brother P-touch
@@ -212,10 +212,8 @@ def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2, auto_cut=Tru
 
     # AUTO CUT MODE - ESC i M @ (0x1B 0x69 0x4D 0x40)
     # 0x40 = enable auto cut after printing
-    # Without this, the tape won't cut automatically
-    if auto_cut:
-        data.append(b"\x1b\x69\x4d\x40")
-
+    data.append(b"\x1b\x69\x4d\x40")
+    
     # CUT EVERY 1 LABEL - ESC i A 01 (0x1B 0x69 0x41 0x01)
     # CRITICAL: This command was missing in broken versions!
     # Tells printer to cut after every 1 label
@@ -226,12 +224,9 @@ def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2, auto_cut=Tru
     # Controls print quality and behavior
     # Base value 0x0C is critical - using 0x00 causes printing issues
     # Bit 6 (0x40): 1 = high resolution (360 dpi), 0 = standard (180 dpi)
-    # Bit 3 (0x08): 1 = no chain printing, 0 = chain printing
     adv = 0x0C  # CRITICAL: Base value must be 0x0C, not 0x00!
     if hi_res:
         adv |= 0x40  # Set bit 6 for high resolution
-    if not auto_cut:
-        adv |= 0x08  # Set bit 3 for no chain printing
     data.append(b"\x1b\x69\x4b" + bytes([adv]))
 
     # MARGIN (FEED) AMOUNT - ESC i d (0x1B 0x69 0x64)
@@ -550,15 +545,6 @@ def main():
         help="printer IP address (required unless using --listen or BROTHER_PRINTER_IP env var)",
     )
     ap.add_argument(
-        "--auto-cut",
-        action="store_true",
-        default=True,
-        help="enable auto-cut (default: enabled)",
-    )
-    ap.add_argument(
-        "--no-auto-cut", action="store_false", dest="auto_cut", help="disable auto-cut"
-    )
-    ap.add_argument(
         "--no-auto-detect",
         action="store_true",
         help="disable auto-detection of tape size",
@@ -655,7 +641,7 @@ def main():
 
     matrix = png_to_bw_matrix(png)
     raster = convert_to_brother_raster(
-        matrix, spec, hi_res=True, auto_cut=args.auto_cut
+        matrix, spec, hi_res=True
     )
 
     bin_filename = f"{tape_size}_{sanitize_filename(args.text)}.bin"
