@@ -29,7 +29,7 @@ dependencies = [
     "pyipp>=0.15.0",
     "zeroconf>=0.147.0",
     "aiozeroconf>=0.1.8",
-    "inline-snapshot[black]>=0.23.2",
+    "inline-snapshot>=0.23.2",
 ]
 
 [project.optional-dependencies]
@@ -46,7 +46,6 @@ test = [
 ]
 dev = [
     "pybrother[labelprinterkit,discovery,test]",
-    "black>=23.0.0",
     "isort>=5.12.0",
     "flake8>=6.0.0",
     "mypy>=1.0.0",
@@ -87,24 +86,6 @@ filterwarnings = [
 ]
 pythonpath = ["src"]
 
-[tool.black]
-line-length = 88
-target-version = ["py38", "py39", "py310", "py311", "py312"]
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-  # directories
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | build
-  | dist
-)/
-'''
-
 [tool.isort]
 profile = "black"
 multi_line_output = 3
@@ -134,3 +115,8 @@ module = [
     "PIL.*",
 ]
 ignore_missing_imports = true
+
+[tool.uv]
+dev-dependencies = [
+    "ruff>=0.14.1",
+]

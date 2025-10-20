@@ -63,34 +63,36 @@ FEED_PX_PER_MM = 14  # ≅ 360 dpi
 def sanitize_filename(text):
     """Remove dangerous characters from filename to prevent path traversal"""
     # Keep only alphanumeric, spaces, hyphens, underscores
-    safe_text = re.sub(r'[^a-zA-Z0-9\s\-_]', '', text)
+    safe_text = re.sub(r"[^a-zA-Z0-9\s\-_]", "", text)
     # Replace spaces with underscores
-    return safe_text.replace(' ', '_')[:50]  # Limit length to 50 chars
+    return safe_text.replace(" ", "_")[:50]  # Limit length to 50 chars
 
 
 # ──────────────────────────────────────────────────────────────
 # PNG-based implementation
 def create_label_png(text, font_size, tape_key, margin_px):
     """Create PNG with perfect symmetric centering using ink-based measurement
-    
+
     Font size is specified in pixels (dots at 360 dpi). Tape heights in pixels:
     - W3.5 (3.5mm): 24 pixels
-    - W6 (6mm): 32 pixels  
+    - W6 (6mm): 32 pixels
     - W9 (9mm): 50 pixels
     - W12 (12mm): 70 pixels
     - W18 (18mm): 112 pixels
     - W24 (24mm): 128 pixels
-    
+
     If font_size is None, automatically selects size based on tape width.
     """
     spec = TAPE_SPECS[tape_key]
     tape_h_px = spec["pins"]
-    
+
     # Auto-size font if not specified
     if font_size is None:
         # Use 75% of tape height for safe fit with ascenders/descenders
         font_size = int(tape_h_px * 0.75)
-        print(f"Auto-selected font size: {font_size}px for {tape_key} tape ({tape_h_px}px height)")
+        print(
+            f"Auto-selected font size: {font_size}px for {tape_key} tape ({tape_h_px}px height)"
+        )
 
     # Choose font
     try:
@@ -118,7 +120,7 @@ def create_label_png(text, font_size, tape_key, margin_px):
     # The printer handles the inversion for black tape automatically
     # Dark pixels (0) → thermal head activates → black on white tape, white on black tape
     # Light pixels (255) → thermal head doesn't activate → white on white tape, black on black tape
-    
+
     # Always use white background with black text
     bg_color = 255  # White background
     text_color = 0  # Black text
@@ -135,21 +137,21 @@ def create_label_png(text, font_size, tape_key, margin_px):
 
 def png_to_bw_matrix(img, threshold=128):
     """Convert PNG to black/white matrix
-    
+
     IMPORTANT: The matrix represents what to PRINT, not the final appearance:
     - 1 = print a dot (thermal head activates)
     - 0 = don't print (thermal head doesn't activate)
-    
+
     On white tape: printing dots makes it black (so 1 = black result)
     On black tape: printing dots makes it white (so 1 = white result)
-    
+
     Therefore we need to handle the logic based on what we want to PRINT,
     not what color we want to see.
     """
     if img.mode != "L":
         img = img.convert("L")
     w, h = img.size
-    
+
     # For Brother printers: pixels < threshold should be printed
     # This works correctly: dark pixels in image → print dots
     data = [
@@ -161,24 +163,24 @@ def png_to_bw_matrix(img, threshold=128):
 
 def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2):
     """Convert matrix to Brother raster format
-    
+
     CRITICAL: This function contains the exact byte sequence required for Brother P-touch
     printers to properly print, feed, and cut labels. Each command is essential and the
     order matters. Missing commands (especially cut settings) will cause printing failures.
     """
     w, h = matrix["width"], matrix["height"]
     data = []
-    
+
     # INVALIDATE COMMAND - 400 NULL bytes
     # This clears the printer's buffer and ensures a clean start
     # Without this, previous print jobs may interfere
     data.append(b"\x00" * 400)
-    
+
     # INITIALIZE COMMAND - ESC @ (0x1B 0x40)
     # Resets the printer to default settings
     # Essential for consistent printing behavior
     data.append(b"\x1b\x40")
-    
+
     # SWITCH TO RASTER MODE - ESC i a 01 (0x1B 0x69 0x61 0x01)
     # Tells printer to expect raster graphics data
     # Mode 01 = raster mode (required for P-touch label printers)
@@ -194,26 +196,26 @@ def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2):
     data.append(
         struct.pack(
             "<BBBBBBBBBBBBB",
-            0x1B,         # ESC
-            0x69,         # i
-            0x7A,         # z
-            0x84,         # flags: PI_KIND|PI_WIDTH
-            0x00,         # media type: continuous tape
+            0x1B,  # ESC
+            0x69,  # i
+            0x7A,  # z
+            0x84,  # flags: PI_KIND|PI_WIDTH
+            0x00,  # media type: continuous tape
             spec["media_byte"],  # tape width (0x06=6mm, 0x09=9mm, etc.)
-            0x00,         # reserved
-            0xAA,         # fixed value
-            0x02,         # fixed value
-            0x00,         # reserved
-            0x00,         # reserved
-            0x00,         # reserved
-            0x00,         # reserved
+            0x00,  # reserved
+            0xAA,  # fixed value
+            0x02,  # fixed value
+            0x00,  # reserved
+            0x00,  # reserved
+            0x00,  # reserved
+            0x00,  # reserved
         )
     )
 
     # AUTO CUT MODE - ESC i M @ (0x1B 0x69 0x4D 0x40)
     # 0x40 = enable auto cut after printing
     data.append(b"\x1b\x69\x4d\x40")
-    
+
     # CUT EVERY 1 LABEL - ESC i A 01 (0x1B 0x69 0x41 0x01)
     # CRITICAL: This command was missing in broken versions!
     # Tells printer to cut after every 1 label
@@ -262,7 +264,7 @@ def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2):
         # - 1 byte: TIFF compression info (0x0F = uncompressed)
         # - 16 bytes: 128 bits for 128 print head pins
         row = bytearray(20)
-        
+
         # RASTER LINE COMMAND - G (0x47)
         # 0x47 = 'G' command for graphics data
         # 0x11 = 17 decimal = 16 data bytes + 1 TIFF byte
@@ -272,7 +274,7 @@ def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2):
         row[1] = 0x11  # data length low byte (17 bytes follow)
         row[2] = 0x00  # data length high byte
         row[3] = 0x0F  # TIFF: uncompressed mode
-        
+
         # Fill in the pixel data for this column
         # Each bit represents one pin on the print head
         # Bit = 1 means print (black), Bit = 0 means no print (white)
@@ -280,16 +282,16 @@ def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2):
             if matrix["data"][y][x]:  # If pixel is black
                 bitpos = y + blank_left  # Position on the 128-pin print head
                 byte_index = 4 + (bitpos // 8)  # Which byte (4-19)
-                bit_offset = 7 - (bitpos % 8)   # Which bit (MSB first)
+                bit_offset = 7 - (bitpos % 8)  # Which bit (MSB first)
                 row[byte_index] |= 1 << bit_offset
-                
+
         data.append(bytes(row))
 
     # PRINT COMMAND - CTRL-Z (0x1A)
     # Tells printer to print the buffered data and feed/cut the label
     # This is the final command that triggers the actual printing
     data.append(b"\x1a")
-    
+
     return b"".join(data)
 
 
@@ -297,20 +299,20 @@ def convert_to_brother_raster(matrix, spec, hi_res=True, feed_mm=2):
 # Auto-discovery functions
 class PassivePrinterListener(ServiceListener):
     """Enhanced listener for passive mDNS discovery - listens for unsolicited announcements"""
-    
+
     def __init__(self, verbose=False):
         self.printers = []
         self.verbose = verbose
         self.found_event = None  # Will be set to asyncio.Event for async usage
-    
+
     def add_service(self, zeroconf, service_type, name):
         # Only process IPP services to avoid errors
         if "_ipp._tcp" not in service_type:
             return
-            
+
         if self.verbose:
             print(f"Detected service: {name}")
-        
+
         # Get service info with error handling
         try:
             info = zeroconf.get_service_info(service_type, name, timeout=3000)
@@ -324,22 +326,27 @@ class PassivePrinterListener(ServiceListener):
                         "port": info.port,
                         "properties": info.properties,
                     }
-                    
+
                     # Check if this printer is already in our list
-                    already_found = any(p['ip'] == ip and p['port'] == info.port 
-                                      for p in self.printers)
-                    
+                    already_found = any(
+                        p["ip"] == ip and p["port"] == info.port for p in self.printers
+                    )
+
                     if not already_found:
                         self.printers.append(printer_info)
                         if self.verbose:
-                            print(f"✓ Found Brother printer: {printer_info['name']} at {ip}:{info.port}")
+                            print(
+                                f"✓ Found Brother printer: {printer_info['name']} at {ip}:{info.port}"
+                            )
                     elif self.verbose:
-                        print(f"  (Already discovered: {printer_info['name']} at {ip}:{info.port})")
-                    
+                        print(
+                            f"  (Already discovered: {printer_info['name']} at {ip}:{info.port})"
+                        )
+
                     # Signal that we found a printer (for async usage)
                     if self.found_event:
                         self.found_event.set()
-                        
+
         except Exception as e:
             if self.verbose:
                 print(f"Error getting service info for {name}: {e}")
@@ -355,16 +362,16 @@ class PassivePrinterListener(ServiceListener):
 
 def discover_with_passive_listening(timeout=70, verbose=False):
     """Enhanced discovery using passive mDNS listening for unsolicited announcements
-    
+
     This method implements the insights from mDNS analysis:
     - Listens passively for unsolicited printer announcements (every ~60s)
-    - Uses IPv4-only to match Brother printer behavior 
+    - Uses IPv4-only to match Brother printer behavior
     - Accepts any well-formed mDNS packet, not just replies to queries
-    
+
     Args:
         timeout: How long to listen for announcements (default 70s)
         verbose: Show detailed discovery messages
-        
+
     Returns:
         List of discovered Brother printers
     """
@@ -373,9 +380,11 @@ def discover_with_passive_listening(timeout=70, verbose=False):
         return []
 
     if verbose:
-        print(f"Listening for Brother printer mDNS announcements ({timeout}s timeout)...")
+        print(
+            f"Listening for Brother printer mDNS announcements ({timeout}s timeout)..."
+        )
         print("Note: Brother printers typically announce themselves every ~60 seconds")
-    
+
     try:
         # Use IPv4-only to match Brother printer behavior (192.168.x.x → 224.0.0.251:5353)
         zeroconf = Zeroconf(ip_version=IPVersion.V4Only)
@@ -383,13 +392,15 @@ def discover_with_passive_listening(timeout=70, verbose=False):
 
         # Create browser that will accept unsolicited announcements
         browser = ServiceBrowser(zeroconf, "_ipp._tcp.local.", listener)
-        
+
         # Wait for announcements (Brother printers announce every ~60s with 4min TTL)
         time.sleep(timeout)
-        
+
         if verbose:
-            print(f"Passive listening completed. Found {len(listener.printers)} Brother printer(s)")
-        
+            print(
+                f"Passive listening completed. Found {len(listener.printers)} Brother printer(s)"
+            )
+
         return listener.printers
 
     except Exception as e:
@@ -412,25 +423,25 @@ async def detect_tape_size(printer_ip):
         async with IPP(host=printer_ip, port=631, base_path="/ipp/print") as ipp:
             # Get media attributes using direct IPP request
             message = {
-                'operation-attributes-tag': {
-                    'requesting-user-name': 'pyipp',
-                    'requested-attributes': [
-                        'media-ready',
-                        'media-default', 
-                        'media-supported',
-                        'printer-name',
-                        'printer-make-and-model'
-                    ]
+                "operation-attributes-tag": {
+                    "requesting-user-name": "pyipp",
+                    "requested-attributes": [
+                        "media-ready",
+                        "media-default",
+                        "media-supported",
+                        "printer-name",
+                        "printer-make-and-model",
+                    ],
                 }
             }
-            
+
             # Execute the request and get media information
             result = await ipp.execute(IppOperation.GET_PRINTER_ATTRIBUTES, message)
-            
+
             # Extract media information from the first printer in the response
-            if result.get('printers') and len(result['printers']) > 0:
-                printer_attrs = result['printers'][0]
-                
+            if result.get("printers") and len(result["printers"]) > 0:
+                printer_attrs = result["printers"][0]
+
                 # Look for media-ready or media-default attributes
                 media_ready = printer_attrs.get("media-ready", "")
                 media_default = printer_attrs.get("media-default", "")
@@ -445,7 +456,7 @@ async def detect_tape_size(printer_ip):
                 media_list = [media_ready, media_default]
                 if isinstance(media_supported, list):
                     media_list.extend(media_supported)
-                
+
                 for media in media_list:
                     if not media:
                         continue
@@ -459,17 +470,25 @@ async def detect_tape_size(printer_ip):
                         return "W6"
                     elif "9x" in media_str or "9mm" in media_str or "_9x" in media_str:
                         return "W9"
-                    elif "12x" in media_str or "12mm" in media_str or "_12x" in media_str:
+                    elif (
+                        "12x" in media_str or "12mm" in media_str or "_12x" in media_str
+                    ):
                         return "W12"
-                    elif "18x" in media_str or "18mm" in media_str or "_18x" in media_str:
+                    elif (
+                        "18x" in media_str or "18mm" in media_str or "_18x" in media_str
+                    ):
                         return "W18"
-                    elif "24x" in media_str or "24mm" in media_str or "_24x" in media_str:
+                    elif (
+                        "24x" in media_str or "24mm" in media_str or "_24x" in media_str
+                    ):
                         return "W24"
 
             # If no specific width found, try to get printer info for fallback
             printer_info = await ipp.printer()
-            printer_name = printer_info.info.model.lower() if printer_info.info.model else ""
-            
+            printer_name = (
+                printer_info.info.model.lower() if printer_info.info.model else ""
+            )
+
             if "pt-p750w" in printer_name:
                 print("Detected PT-P750W, defaulting to W6 (6mm)")
                 return "W6"
@@ -492,11 +511,13 @@ async def send_via_ipp(binary, copies, printer=None):
         try:
             printer_info = await ipp.printer()
             if printer_info.state.printer_state != "idle":
-                print(f"Warning: Printer state is '{printer_info.state.printer_state}', not idle")
+                print(
+                    f"Warning: Printer state is '{printer_info.state.printer_state}', not idle"
+                )
         except Exception as e:
             # Don't fail if status check fails, just warn
             print(f"Warning: Could not check printer status: {e}")
-        
+
         msg = {
             "operation-attributes-tag": {
                 "requesting-user-name": "python",
@@ -520,8 +541,11 @@ def main():
     ap = argparse.ArgumentParser(description="Universal Brother Label Printer")
     ap.add_argument("text", help="label text, quotes for spaces")
     ap.add_argument(
-        "-f", "--font", type=int, default=None, 
-        help="font size in pixels/dots (default: auto-size based on tape width)"
+        "-f",
+        "--font",
+        type=int,
+        default=None,
+        help="font size in pixels/dots (default: auto-size based on tape width)",
     )
     ap.add_argument(
         "-t",
@@ -551,7 +575,7 @@ def main():
     )
     ap.add_argument(
         "--listen",
-        action="store_true", 
+        action="store_true",
         help="discover printer via passive mDNS listening (waits for printer announcements every ~60s)",
     )
     ap.add_argument(
@@ -567,15 +591,15 @@ def main():
     if args.font is not None and (args.font <= 0 or args.font > 200):
         print("Error: Font size must be between 1 and 200")
         sys.exit(1)
-    
+
     if args.margin < 0 or args.margin > 100:
         print("Error: Margin must be between 0 and 100")
         sys.exit(1)
-    
+
     if args.copies <= 0 or args.copies > 10:
         print("Error: Copies must be between 1 and 10")
         sys.exit(1)
-    
+
     if args.listen_timeout <= 0 or args.listen_timeout > 300:
         print("Error: Listen timeout must be between 1 and 300 seconds")
         sys.exit(1)
@@ -587,8 +611,10 @@ def main():
     if not printer_ip:
         if args.listen:
             # Use passive listening discovery
-            printers = discover_with_passive_listening(timeout=args.listen_timeout, verbose=True)
-            
+            printers = discover_with_passive_listening(
+                timeout=args.listen_timeout, verbose=True
+            )
+
             if printers:
                 printer_ip = printers[0]["ip"]
                 print(f"✓ Using printer: {printers[0]['name']} at {printer_ip}")
@@ -596,20 +622,24 @@ def main():
                     print(f"Note: Found {len(printers)} printers, using first one")
             else:
                 print("❌ No Brother printers found during passive listening")
-                print("Tip: Increase --listen-timeout (try 60-90s) or specify IP with --printer")
+                print(
+                    "Tip: Increase --listen-timeout (try 60-90s) or specify IP with --printer"
+                )
         else:
             # Try environment variable
             printer_ip = os.getenv("BROTHER_PRINTER_IP")
             if printer_ip:
                 print(f"Using BROTHER_PRINTER_IP: {printer_ip}")
-            
+
         # If still no IP, show helpful error
         if not printer_ip:
             print("❌ No printer IP specified")
             print("Options:")
             print("  1. Specify IP directly: --printer 192.168.1.175")
             print("  2. Use passive discovery: --listen (waits for announcements)")
-            print("  3. Set environment variable: export BROTHER_PRINTER_IP=192.168.1.175")
+            print(
+                "  3. Set environment variable: export BROTHER_PRINTER_IP=192.168.1.175"
+            )
             sys.exit(1)
 
     # Auto-detect tape size if not specified
@@ -627,22 +657,16 @@ def main():
         tape_size = "W6"
 
     font_display = "auto" if args.font is None else f"{args.font}px"
-    print(
-        f"Text: '{args.text}' | Font: {font_display} | Tape: {tape_size}"
-    )
+    print(f"Text: '{args.text}' | Font: {font_display} | Tape: {tape_size}")
 
     # PNG mode is now the only mode
-    png, spec = create_label_png(
-        args.text, args.font, tape_size, args.margin
-    )
+    png, spec = create_label_png(args.text, args.font, tape_size, args.margin)
     filename = f"{tape_size}_{sanitize_filename(args.text)}.png"
     png.save(filename)
     print(f"✓ Saved PNG: {filename}")
 
     matrix = png_to_bw_matrix(png)
-    raster = convert_to_brother_raster(
-        matrix, spec, hi_res=True
-    )
+    raster = convert_to_brother_raster(matrix, spec, hi_res=True)
 
     bin_filename = f"{tape_size}_{sanitize_filename(args.text)}.bin"
     with open(bin_filename, "wb") as f:
