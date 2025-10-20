@@ -3,14 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "brother-label-printer"
+name = "pybrother"
 version = "0.1.0"
 description = "Universal Brother Label Printer with PNG and labelprinterkit modes"
 readme = "README.md"
 requires-python = ">=3.9"
+license = { file = "LICENSE" }
 authors = [
     { name = "Brother Label Printer Team" }
 ]
+keywords = ["pybrother", "label-printer", "cli", "printing", "uvx"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -27,6 +29,7 @@ dependencies = [
     "pyipp>=0.15.0",
     "zeroconf>=0.147.0",
     "aiozeroconf>=0.1.8",
+    "inline-snapshot[black]>=0.23.2",
 ]
 
 [project.optional-dependencies]
@@ -42,7 +45,7 @@ test = [
     "pytest-asyncio>=0.21.0",
 ]
 dev = [
-    "brother-label-printer[labelprinterkit,discovery,test]",
+    "pybrother[labelprinterkit,discovery,test]",
     "black>=23.0.0",
     "isort>=5.12.0",
     "flake8>=6.0.0",
@@ -50,19 +53,30 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["."]
-include = ["brother_printer.py"]
+packages = ["src/pybrother"]
+
+[tool.hatch.build]
+exclude = [
+    "__pycache__",
+    "LOCAL_TODO",
+    "tests",
+    "test_*.py",
+    "*.bin",
+    "*.png",
+    "uv.lock",
+]
 
 [project.scripts]
-brother-printer = "brother_printer:main"
+pybrother = "pybrother.cli:main"
+brother-printer = "pybrother.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/example/brother-label-printer"
-Repository = "https://github.com/example/brother-label-printer.git"
-Issues = "https://github.com/example/brother-label-printer/issues"
+Homepage = "https://github.com/example/pybrother"
+Repository = "https://github.com/example/pybrother.git"
+Issues = "https://github.com/example/pybrother/issues"
 
 [tool.pytest.ini_options]
-testpaths = ["."]
+testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -71,6 +85,7 @@ filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",
 ]
+pythonpath = ["src"]
 
 [tool.black]
 line-length = 88
@@ -94,7 +109,7 @@ extend-exclude = '''
 profile = "black"
 multi_line_output = 3
 line_length = 88
-known_first_party = ["brother_printer"]
+known_first_party = ["pybrother"]
 
 [tool.mypy]
 python_version = "3.8"

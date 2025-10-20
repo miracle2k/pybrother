@@ -1,51 +1,55 @@
-# Brother Label Printer
+# pybrother
 
-A small Python library and CLI tool for printing labels to Brother printers. This project was largely developed with AI assistance.
+A Python CLI and helper library for printing labels on networked Brother P‑touch printers using their raster command set. 
 
-## Usage
+## Quick Start
 
-### Install
-
-```bash
-uv sync
-```
-
-### Print a label
+### Run without installing
 
 ```bash
-# Basic usage (auto-detects printer and tape size)
-uv run brother_printer.py "Hello World"
+# Show help
+uvx pybrother -- --help
 
-# Specify font size and tape
-uv run brother_printer.py "Large Text" --font 60 --tape W12
-
-# Use white tape with black text
-uv run brother_printer.py "White Label" --white-tape
-
-# Manual printer IP
-uv run brother_printer.py "Test" --printer 192.168.1.100
-
-# Or set environment variable for default IP
-export BROTHER_PRINTER_IP=192.168.1.100
-uv run brother_printer.py "Test"
+# Print a label
+uvx pybrother -- "Hello World" --printer 192.168.1.100
 ```
 
-### Options
+`uvx` will download the package, create an isolated environment, and run the `pybrother` console entry point (an alias named `brother-printer` remains for compatibility).
 
-- `--font` - Font size in pixels (default: 40)
-- `--tape` - Tape size: W3_5, W6, W9, W12, W18, W24 (auto-detected)
-- `--margin` - Left/right margins in pixels (default: 10)
-- `--copies` - Number of copies (default: 1)
-- `--printer` - Printer IP address (auto-discovered or from BROTHER_PRINTER_IP env var)
-- `--white-tape` - Use white tape with black text
-- `--mode` - Use `png` (default) or `labelprinterkit` mode
+### Install from PyPI
+
+```bash
+pip install pybrother
+
+# Then use the CLI directly
+pybrother "Hello World" --printer 192.168.1.100
+```
+
+## Command Options
+
+The CLI supports the following useful switches:
+
+- `text` – Label text (wrap in quotes for spaces)
+- `--font` – Font size in dots (default: auto size per tape)
+- `--tape` – Tape size (`W3_5`, `W6`, `W9`, `W12`, `W18`, `W24`)
+- `--margin` – Left/right margin in pixels (default: `10`)
+- `--copies` – Number of copies to print (default: `1`)
+- `--printer` – Printer IP address (required unless discovered or from env var)
+- `--listen` – Passively listen for printers via mDNS (requires `zeroconf`)
+- `--listen-timeout` – Seconds to wait when listening (default: `70`)
+- `--no-auto-detect` – Skip automatic tape detection
+
+Set `BROTHER_PRINTER_IP` to avoid providing `--printer` each invocation.
 
 ## Development
 
 ```bash
-# Install with dev dependencies
+# Install dependencies (including dev extras)
 uv sync --extra dev
 
-# Run tests
+# Run the test suite
 uv run pytest
+
+# Build a wheel and sdist
+uv run hatch build
 ```
