@@ -22,6 +22,7 @@ import re
 import socket
 import struct
 import sys
+import threading
 import time
 
 from PIL import Image, ImageDraw, ImageFont
@@ -303,7 +304,7 @@ class PassivePrinterListener(ServiceListener):
     def __init__(self, verbose=False):
         self.printers = []
         self.verbose = verbose
-        self.found_event = None  # Will be set to asyncio.Event for async usage
+        self.found_event = threading.Event()  # Used to signal early termination
 
     def add_service(self, zeroconf, service_type, name):
         # Only process IPP services to avoid errors
@@ -343,9 +344,8 @@ class PassivePrinterListener(ServiceListener):
                             f"  (Already discovered: {printer_info['name']} at {ip}:{info.port})"
                         )
 
-                    # Signal that we found a printer (for async usage)
-                    if self.found_event:
-                        self.found_event.set()
+                    # Signal that we found a printer
+                    self.found_event.set()
 
         except Exception as e:
             if self.verbose:
@@ -393,10 +393,13 @@ def discover_with_passive_listening(timeout=70, verbose=False):
         # Create browser that will accept unsolicited announcements
         browser = ServiceBrowser(zeroconf, "_ipp._tcp.local.", listener)
 
-        # Wait for announcements (Brother printers announce every ~60s with 4min TTL)
-        time.sleep(timeout)
+        # Wait for announcements, but return early if we find a printer
+        # Brother printers announce every ~60s with 4min TTL
+        found = listener.found_event.wait(timeout)
 
         if verbose:
+            if found:
+                print(f"Found printer early, skipping remaining wait time")
             print(
                 f"Passive listening completed. Found {len(listener.printers)} Brother printer(s)"
             )
