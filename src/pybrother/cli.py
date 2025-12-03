@@ -28,6 +28,7 @@ import time
 from PIL import Image, ImageDraw, ImageFont
 from pyipp import IPP
 from pyipp.enums import IppOperation
+from pyipp.exceptions import IPPError
 
 # Try importing optional dependencies
 try:
@@ -505,37 +506,74 @@ async def detect_tape_size(printer_ip):
 
 # ──────────────────────────────────────────────────────────────
 # IPP communication
-async def send_via_ipp(binary, copies, printer=None):
-    """Send Brother raster data via IPP"""
+IPP_STATUS_BUSY = 1287  # Printer busy status code
+
+
+async def send_via_ipp(binary, copies, printer=None, max_retries=5, initial_delay=2):
+    """Send Brother raster data via IPP with retry on busy.
+
+    Args:
+        binary: The raster data to send
+        copies: Number of copies to print
+        printer: Printer IP address
+        max_retries: Maximum number of retry attempts (default 5, ~15s total)
+        initial_delay: Initial delay between retries in seconds (increases each attempt)
+    """
     if printer is None:
         raise ValueError("Printer IP address must be specified")
-    async with IPP(host=printer, port=631, base_path="/ipp/print") as ipp:
-        # Check printer status first - this can help recover stuck printers
-        try:
-            printer_info = await ipp.printer()
-            if printer_info.state.printer_state != "idle":
-                print(
-                    f"Warning: Printer state is '{printer_info.state.printer_state}', not idle"
-                )
-        except Exception as e:
-            # Don't fail if status check fails, just warn
-            print(f"Warning: Could not check printer status: {e}")
 
-        msg = {
-            "operation-attributes-tag": {
-                "requesting-user-name": "python",
-                "job-name": "brother_label",
-                "document-format": "application/octet-stream",
-            },
-            "job-attributes-tag": {
-                "copies": copies,
-                "sides": "one-sided",
-                "orientation-requested": 4,
-            },
-            "data": binary,
-        }
-        res = await ipp.execute(IppOperation.PRINT_JOB, msg)
-        return res.get("status-code", -1) == 0
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            async with IPP(host=printer, port=631, base_path="/ipp/print") as ipp:
+                # Check printer status first - this can help recover stuck printers
+                try:
+                    printer_info = await ipp.printer()
+                    if printer_info.state.printer_state != "idle":
+                        print(
+                            f"Warning: Printer state is '{printer_info.state.printer_state}', not idle"
+                        )
+                except Exception as e:
+                    # Don't fail if status check fails, just warn
+                    print(f"Warning: Could not check printer status: {e}")
+
+                msg = {
+                    "operation-attributes-tag": {
+                        "requesting-user-name": "python",
+                        "job-name": "brother_label",
+                        "document-format": "application/octet-stream",
+                    },
+                    "job-attributes-tag": {
+                        "copies": copies,
+                        "sides": "one-sided",
+                        "orientation-requested": 4,
+                    },
+                    "data": binary,
+                }
+                res = await ipp.execute(IppOperation.PRINT_JOB, msg)
+                return res.get("status-code", -1) == 0
+
+        except IPPError as e:
+            # Check if it's a busy error (status code 1287)
+            if len(e.args) >= 2 and isinstance(e.args[1], dict):
+                status_code = e.args[1].get("status-code")
+                if status_code == IPP_STATUS_BUSY:
+                    last_error = e
+                    if attempt < max_retries:
+                        delay = initial_delay + attempt  # 2s, 3s, 4s, 5s, 6s
+                        print(f"Printer busy, retrying in {delay}s... (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        print("Printer busy, giving up after max retries")
+                        return False
+            # Re-raise non-busy IPP errors
+            raise
+
+    # Should not reach here, but just in case
+    if last_error:
+        raise last_error
+    return False
 
 
 # ──────────────────────────────────────────────────────────────
