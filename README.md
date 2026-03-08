@@ -12,6 +12,12 @@ uvx pybrother -- --help
 
 # Print a label
 uvx pybrother -- "Hello World" --printer 192.168.1.100
+
+# Save PNG preview explicitly
+uvx pybrother -- "Hello World" --printer 192.168.1.100 --output ~/Desktop/label.png
+
+# Save debug artifacts (PNG + BIN) in temp directory
+uvx pybrother -- "Hello World" --printer 192.168.1.100 --artifacts
 ```
 
 `uvx` will download the package, create an isolated environment, and run the `pybrother` console entry point (an alias named `brother-printer` remains for compatibility).
@@ -38,6 +44,10 @@ The CLI supports the following useful switches:
 - `--listen` – Passively listen for printers via mDNS (requires `zeroconf`)
 - `--listen-timeout` – Seconds to wait when listening (default: `70`)
 - `--no-auto-detect` – Skip automatic tape detection
+- `--output PATH` – Save PNG preview to a specific file
+- `--artifacts [DIR]` – Save debug `PNG + BIN` files (optional target directory)
+
+By default, pybrother renders and prints fully in memory (no PNG/BIN files are written unless requested).
 
 Set `BROTHER_PRINTER_IP` to avoid providing `--printer` each invocation.
 

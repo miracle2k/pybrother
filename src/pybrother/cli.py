@@ -12,6 +12,11 @@ Printer discovery options:
 - Manual IP: --printer 192.168.1.175 (fastest)
 - Passive listening: --listen (waits for printer announcements every ~60s)
 - Environment variable: export BROTHER_PRINTER_IP=192.168.1.175
+
+Output behavior:
+- Default: render and print fully in memory (no files written)
+- --output PATH: save PNG preview
+- --artifacts [DIR]: save debug PNG+BIN files
 """
 
 import argparse
@@ -22,8 +27,10 @@ import re
 import socket
 import struct
 import sys
+import tempfile
 import threading
 import time
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 from pyipp import IPP
@@ -67,7 +74,44 @@ def sanitize_filename(text):
     # Keep only alphanumeric, spaces, hyphens, underscores
     safe_text = re.sub(r"[^a-zA-Z0-9\s\-_]", "", text)
     # Replace spaces with underscores
-    return safe_text.replace(" ", "_")[:50]  # Limit length to 50 chars
+    safe_text = safe_text.replace(" ", "_")[:50]  # Limit length to 50 chars
+    return safe_text or "label"
+
+
+def prepare_artifacts_dir(artifacts_arg):
+    """Resolve and create artifacts directory from CLI option.
+
+    Args:
+        artifacts_arg:
+            - None: artifacts disabled
+            - "": enabled with default temp location
+            - "/path": enabled with explicit directory
+    """
+    if artifacts_arg is None:
+        return None
+
+    # --artifacts without an explicit dir
+    if artifacts_arg == "":
+        base_dir = Path(tempfile.gettempdir()) / "pybrother"
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        run_name = time.strftime("%Y%m%d-%H%M%S")
+        run_dir = base_dir / run_name
+        suffix = 0
+        while run_dir.exists():
+            suffix += 1
+            run_dir = base_dir / f"{run_name}-{suffix}"
+
+        run_dir.mkdir(parents=True, exist_ok=False)
+        return run_dir
+
+    # --artifacts <dir>
+    artifacts_dir = Path(artifacts_arg).expanduser()
+    if artifacts_dir.exists() and not artifacts_dir.is_dir():
+        raise ValueError(f"Artifacts path is not a directory: {artifacts_dir}")
+
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    return artifacts_dir
 
 
 # ──────────────────────────────────────────────────────────────
@@ -625,6 +669,19 @@ def main():
         default=70,
         help="timeout for passive listening in seconds (default: 70s)",
     )
+    ap.add_argument(
+        "--output",
+        default=None,
+        help="save PNG preview to this file path",
+    )
+    ap.add_argument(
+        "--artifacts",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="DIR",
+        help="save debug PNG+BIN artifacts (optionally in DIR; default: system temp)",
+    )
 
     args = ap.parse_args()
 
@@ -643,6 +700,19 @@ def main():
 
     if args.listen_timeout <= 0 or args.listen_timeout > 300:
         print("Error: Listen timeout must be between 1 and 300 seconds")
+        sys.exit(1)
+
+    output_path = None
+    if args.output:
+        output_path = Path(args.output).expanduser()
+        if output_path.exists() and output_path.is_dir():
+            print("Error: --output must be a file path, not a directory")
+            sys.exit(1)
+
+    try:
+        artifacts_dir = prepare_artifacts_dir(args.artifacts)
+    except ValueError as e:
+        print(f"Error: {e}")
         sys.exit(1)
 
     print("Brother Label Printer")
@@ -700,19 +770,27 @@ def main():
     font_display = "auto" if args.font is None else f"{args.font}px"
     print(f"Text: '{args.text}' | Font: {font_display} | Tape: {tape_size}")
 
-    # PNG mode is now the only mode
+    # PNG mode is now the only mode (rendered in memory)
     png, spec = create_label_png(args.text, args.font, tape_size, args.margin)
-    filename = f"{tape_size}_{sanitize_filename(args.text)}.png"
-    png.save(filename)
-    print(f"✓ Saved PNG: {filename}")
-
     matrix = png_to_bw_matrix(png)
     raster = convert_to_brother_raster(matrix, spec, hi_res=True)
 
-    bin_filename = f"{tape_size}_{sanitize_filename(args.text)}.bin"
-    with open(bin_filename, "wb") as f:
-        f.write(raster)
-    print(f"✓ Saved binary: {bin_filename}")
+    label_stem = f"{tape_size}_{sanitize_filename(args.text)}"
+
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        png.save(output_path)
+        print(f"✓ Saved PNG: {output_path}")
+
+    if artifacts_dir is not None:
+        png_path = artifacts_dir / f"{label_stem}.png"
+        bin_path = artifacts_dir / f"{label_stem}.bin"
+
+        png.save(png_path)
+        with open(bin_path, "wb") as f:
+            f.write(raster)
+
+        print(f"✓ Saved artifacts in: {artifacts_dir}")
 
     ok = asyncio.run(send_via_ipp(raster, args.copies, printer_ip))
     print("✓ printed" if ok else "✗ failed")
